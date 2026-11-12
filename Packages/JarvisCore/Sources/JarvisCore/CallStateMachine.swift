@@ -97,7 +97,7 @@ public struct CallStateMachine: Equatable, Sendable {
             advance(&fx)
 
         case .unpaired:
-            paired = false; welcomed = false
+            paired = false; welcomed = false; muted = false
             teardown(&fx, sendEnd: false)
             wantCall = false
             phase = .idle
@@ -170,6 +170,7 @@ public struct CallStateMachine: Equatable, Sendable {
 
         case .serverCallEnded(let reason):
             let was = phase
+            muted = false                       // a new call starts unmuted
             teardown(&fx, sendEnd: false)
             wantCall = false
             phase = .idle
@@ -186,12 +187,14 @@ public struct CallStateMachine: Equatable, Sendable {
 
         case .userEndCall:
             let wasLive = phase != .idle
+            muted = false                       // a new call starts unmuted
             teardown(&fx, sendEnd: wasLive)
             wantCall = false
             phase = .idle
 
         case .holdExpired:
             guard phase == .held else { break }
+            muted = false                       // the call is gone; the next one starts unmuted
             teardown(&fx, sendEnd: false)
             phase = .idle                       // wantCall stays true: the next welcome starts a fresh call
             fx.append(.notice("Connection lost. Reconnecting…"))
@@ -214,7 +217,9 @@ public struct CallStateMachine: Equatable, Sendable {
             }
 
         case .setMuted(let m):
-            muted = m
+            // muting belongs to a call: with no call (idle) there is nothing to mute and the next call starts unmuted.
+            // It survives everything else: reconnects (`held`), interruptions, route changes, audio restarts.
+            muted = (phase == .idle || isBlocked) ? false : m
 
         case .callStartFailed(let why):
             guard phase == .waitingServer || phase == .startingAudio else { break }

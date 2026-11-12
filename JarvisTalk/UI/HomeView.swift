@@ -102,6 +102,17 @@ struct HomeView: View {
             NeuralCoreView(state: orbState, muted: call.muted, persona: persona, active: orbActive,
                            micLevel: { call.micLevel }, outLevel: { call.outLevel })
                 .frame(height: 300)
+                .opacity(call.muted ? 0.4 : 1)                       // muted: the orb dims
+                .saturation(call.muted ? 0.3 : 1)
+                .animation(.easeInOut(duration: 0.25), value: call.muted)
+                .overlay(alignment: .bottom) {
+                    if call.muted {
+                        Label("Microphone muted", systemImage: "mic.slash.fill").font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(Theme.warn).padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Capsule().fill(Color.black.opacity(0.5))).overlay(Capsule().stroke(Theme.warn.opacity(0.7)))
+                            .transition(.opacity)
+                    }
+                }
                 .contentShape(Rectangle())
                 .onTapGesture {
                     if app.display.canRetry { app.retryConnection() }
@@ -287,8 +298,7 @@ struct HomeView: View {
 
     private var callBar: some View {
         HStack(spacing: 18) {
-            roundButton(call.muted ? "mic.slash.fill" : "mic.fill", label: call.muted ? "Unmute microphone" : "Mute microphone",
-                        tint: call.muted ? Theme.warn : Theme.text, enabled: call.inCall) { call.toggleMute() }
+            muteButton
             Button {
                 if call.phase.isBlocked { alertFor(call.phase) } else { call.toggleCall() }
             } label: {
@@ -305,6 +315,26 @@ struct HomeView: View {
         .padding(.vertical, 10).padding(.horizontal, 20)
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
+    }
+
+    /// The mic button: unmistakably different when muted (red-orange filled disc, slashed mic, "MUTED" caption).
+    private var muteButton: some View {
+        let on = call.muted
+        return Button { call.toggleMute() } label: {
+            VStack(spacing: 3) {
+                Image(systemName: on ? "mic.slash.fill" : "mic.fill").font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(on ? .white : Theme.text)
+                    .frame(width: 52, height: 52)
+                    .background(Circle().fill(on ? Theme.warn : Color.white.opacity(0.08)))
+                    .overlay(Circle().stroke(on ? Theme.warn : Color.clear, lineWidth: 2).scaleEffect(1.12).opacity(on ? 0.5 : 0))
+                Text(on ? "MUTED" : "MIC").font(.system(size: 9, weight: .bold, design: .monospaced)).tracking(1.5)
+                    .foregroundColor(on ? Theme.warn : Theme.dimText)
+            }
+        }
+        .disabled(!call.canMute).opacity(call.canMute ? 1 : 0.4)
+        .animation(.easeInOut(duration: 0.18), value: on)
+        .accessibilityLabel(on ? "Unmute microphone" : "Mute microphone")
+        .accessibilityValue(on ? "Muted" : "Microphone on")
     }
 
     private func alertFor(_ phase: CallStateMachine.Phase) {

@@ -27,6 +27,9 @@ final class VoiceAudioEngine: VoiceAudio, @unchecked Sendable {
     private let log = Logger(subsystem: "com.jarvis.talk", category: "audio")
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    /// A silent looping buffer: keeps the output running so iOS treats the call as "playing audio" and sends the lock-screen
+    /// and earbud buttons (mute / unmute) to this app even when Jarvis is not speaking.
+    private let keeper = AVAudioPlayerNode()
     private let playFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24_000, channels: 1, interleaved: false)!
     private let queue = DispatchQueue(label: "jarvis.audio.play")
     private let micQueue = DispatchQueue(label: "jarvis.audio.mic", qos: .userInteractive)
@@ -84,8 +87,9 @@ final class VoiceAudioEngine: VoiceAudio, @unchecked Sendable {
         // Voice processing (echo cancellation, noise suppression) has to be switched on before the graph is built.
         if !engine.inputNode.isVoiceProcessingEnabled { try engine.inputNode.setVoiceProcessingEnabled(true) }
 
-        if !playerAttached { engine.attach(player); playerAttached = true }
+        if !playerAttached { engine.attach(player); engine.attach(keeper); playerAttached = true }
         engine.connect(player, to: engine.mainMixerNode, format: playFormat)
+        engine.connect(keeper, to: engine.mainMixerNode, format: playFormat)
 
         let inFormat = engine.inputNode.outputFormat(forBus: 0)
         guard inFormat.sampleRate > 0, inFormat.channelCount > 0 else { throw VoiceAudioError.noInput }
@@ -104,6 +108,13 @@ final class VoiceAudioEngine: VoiceAudio, @unchecked Sendable {
         engine.prepare()
         try engine.start()
         player.play()
+        if let silence = AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: 24_000) {
+            silence.frameLength = 24_000
+            if let d = silence.floatChannelData?[0] { memset(d, 0, 24_000 * MemoryLayout<Float>.size) }   // one second of zeros
+            keeper.stop()
+            keeper.scheduleBuffer(silence, at: nil, options: .loops, completionHandler: nil)
+            keeper.play()
+        }
         log.info("audio started: input \(Int(rate)) Hz, route \(self.routeName, privacy: .public)")
     }
 
@@ -111,6 +122,7 @@ final class VoiceAudioEngine: VoiceAudio, @unchecked Sendable {
         engine.inputNode.removeTap(onBus: 0)
         engine.mainMixerNode.removeTap(onBus: 0)
         player.stop()
+        keeper.stop()
         engine.stop()
         queue.sync { generation += 1; outstanding = 0; aligner.reset() }
         onPlaybackActive?(false)

@@ -94,3 +94,17 @@ with a new `jarvis pair` code; the other address keeps its own token.
 * The server logs `ws.open` (with `ua=JarvisTalk-iOS`) when the app connects and `ws.close` with the close code.
 * `GET /api/me` with the device cookie shows the device name.
 * Revoking the phone on the laptop makes the app show the pairing screen with "no longer paired".
+
+## Mute / earbud press does nothing (UNVERIFIED on a real device)
+
+The earbud / headset press is mapped to mute through the media remote commands (play, pause, togglePlayPause). iOS only sends
+them to the app it considers "Now Playing". If a press does nothing, or starts Music:
+1. Make sure the call is up (status says Connected) and that Jarvis' card shows on the lock screen ("Jarvis call"). If the card is
+   missing, the app is not Now Playing: start the call again, and close other audio apps (Music, Podcasts, YouTube) first.
+2. Use the lock-screen / Control Center card or the mic button instead; they use the same mute.
+3. iOS 17+ with AirPods: the "mute / unmute" stem gesture (Settings > the AirPods > Press once to mute, if offered) uses the system
+   mute path (`AVAudioApplication`) which JarvisTalk also listens to.
+4. Wired / third-party Bluetooth headsets differ: the hook button is `togglePlayPause`; double / triple press (next / previous track)
+   are deliberately ignored.
+5. If you find that the press reaches the app only when Jarvis was speaking recently, tell me: the silent keeper buffer in
+   `VoiceAudioEngine` is the knob (it may need a real tiny non-zero signal or an `AVAudioPlayer`).

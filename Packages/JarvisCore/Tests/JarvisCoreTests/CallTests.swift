@@ -138,6 +138,12 @@ final class CallStateMachineTests: XCTestCase {
 
     func testMuteIsTrackedNotAnEffect() {
         var m = ready()
+        XCTAssertEqual(m.handle(.setMuted(true)), []); XCTAssertFalse(m.muted, "no call, nothing to mute")
+        m.handle(.launched(paired: true, autoStart: true)); m.handle(.audioStarted); m.handle(.socketWelcomed); m.handle(.serverCallStarted(resumed: false))
         XCTAssertEqual(m.handle(.setMuted(true)), []); XCTAssertTrue(m.muted)
+        m.handle(.socketDropped); XCTAssertTrue(m.muted, "survives a dropped socket")
+        m.handle(.socketWelcomed); m.handle(.serverCallStarted(resumed: true)); XCTAssertTrue(m.muted)
+        m.handle(.interruptionBegan); m.handle(.interruptionEnded(shouldResume: true)); XCTAssertTrue(m.muted)
+        m.handle(.userEndCall); XCTAssertFalse(m.muted, "a new call starts unmuted")
     }
 }

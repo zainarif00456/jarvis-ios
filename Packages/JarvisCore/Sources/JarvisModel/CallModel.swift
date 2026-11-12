@@ -55,6 +55,8 @@ public final class CallModel: ObservableObject {
     public var callRetryDelays: [TimeInterval] = [2, 5, 10]
     /// Fires after every state change: the app model recomputes what it shows.
     public var onChange: () -> Void = {}
+    /// Fires when the microphone mute state changes, from any trigger (button, earbud press, lock screen, system mute).
+    public var onMutedChanged: (Bool) -> Void = { _ in }
 
     /// Wired by the app model: how to talk to the server.
     public var sendMessage: (ClientMessage) -> Void = { _ in }
@@ -157,11 +159,16 @@ public final class CallModel: ObservableObject {
     }
     public func toggleCall() { if machine.wantCall || machine.inCall { endCall() } else { startCall() } }
     public func toggleMute() { setMuted(!muted) }
-    public func setMuted(_ m: Bool) {
+    /// Mutes only the microphone that goes to Jarvis. The socket, the call and his voice stay up; nothing else changes.
+    /// Returns the state in effect afterwards (false when there is no call to mute).
+    @discardableResult
+    public func setMuted(_ m: Bool) -> Bool {
         run(machine.handle(.setMuted(m)))
-        pipe.configure(muted: m)
-        muted = m
+        publish()
+        return muted
     }
+    /// Earbud press / lock screen: only while a call is on.
+    public var canMute: Bool { machine.phase != .idle && !machine.isBlocked }
     /// Stop Jarvis talking (the web page's interrupt button).
     public func interrupt() { audio.cutPlayback(); sendMessage(.interrupt) }
 
@@ -289,7 +296,11 @@ public final class CallModel: ObservableObject {
             if machine.phase == .idle || machine.phase == .held { caption = "" }
             if machine.phase == .idle { voiceState = "idle" }
         }
-        muted = machine.muted
+        if muted != machine.muted {
+            muted = machine.muted
+            onMutedChanged(muted)
+        }
+        pipe.configure(muted: machine.muted)    // one source of truth: the machine (a new call starts unmuted)
     }
 }
 

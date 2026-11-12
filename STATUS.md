@@ -40,6 +40,37 @@ the orb and the status line are tappable) / Tap to talk (call ended on purpose) 
 4. Wi-Fi -> mobile data with the app open: Reconnecting... then Connected within a few seconds, call resumes.
 5. Point the address at an ngrok URL that shows the browser warning page: "Not connected" + the "Edit address" card.
 
+## Phase 2: Mute / unmute ("the tap feature"): DONE (logic tested), earbud press UNVERIFIED on a device
+
+Mute silences only the microphone frames sent to Jarvis (the server keeps the speech recogniser alive with silence, exactly as it
+does for the browser). Socket, call and his voice stay up; unmute resumes on the next 40 ms frame. One source of truth: the call
+state machine (`muted`), so every trigger ends in `CallModel.setMuted`:
+* (a) the mic button, bottom left of Home: slashed mic on a filled orange disc, "MUTED" caption, orb dimmed + "Microphone muted"
+  badge; tapping the orb also toggles it.
+* (b) earbud / headset: `MPRemoteCommandCenter` togglePlayPause (press, headset hook), play = unmute, pause = mute, only while a
+  call is on; `MPNowPlayingInfoCenter` filled and `playbackState` kept in step; a silent looping buffer in the audio engine keeps
+  the output running so iOS treats the app as the Now Playing app with the phone locked.
+* (c) lock screen / Control Center card: "Jarvis call", "Microphone on / muted", play-pause button.
+* (d) iOS 17+: `AVAudioApplication` input-mute handler + notification (AirPods stem "mute" gesture, Control Center), behind
+  `#available(iOS 17.0, *)`; our mute is pushed to the system too and released when the call ends.
+* Survives Bluetooth route changes, interruptions, audio restarts, dropped sockets and reconnects (tests); a new call (after
+  End, server `call_ended`, hold timeout, unpairing) starts unmuted. With no call there is nothing to mute.
+* Tests: no frames while muted, voice still plays, no `call_end`, unmute at once, toggle idempotent, reconnect / interruption /
+  route change / media reset, new call unmuted, server end clears it (`MuteTests`, `CallStateMachineTests`).
+* **Honest status of the earbud press:** the media-key route is how every call/voice app does it, but whether iOS delivers a
+  press to JarvisTalk (and not to Music or nothing) depends on iOS's Now Playing choice and was NOT tried on a real device. The
+  AirPods "mute" gesture needs iOS 17+ and AirPods that support it. Fallbacks are in TROUBLESHOOTING.md.
+
+**Test on the phone (Phase 2):**
+1. In a call tap the mic button: icon turns into the slashed mic on orange, caption MUTED, orb dims. Talk: Jarvis does not react (his
+   voice and the call continue). Tap again: he hears you at once.
+2. Mute, switch to AirPods / Bluetooth and back, take a phone call or Siri interruption: still muted afterwards. Drop Wi-Fi for 10 s: still muted
+   after the reconnect.
+3. End the call and start a new one: unmuted.
+4. Lock the phone, play-pause button on the lock screen / Control Center: the card says "Jarvis call", pressing toggles mute.
+5. AirPods / wired earbuds: one press of the stem / centre button toggles mute with the phone locked in the pocket. Report if
+   nothing happens or if Music starts instead. iOS 17+: also try the AirPods mute gesture.
+
 # STATUS (written 2026-11-12, on the Linux laptop; nothing here has run on a Mac or an iPhone yet)
 
 ## In one paragraph

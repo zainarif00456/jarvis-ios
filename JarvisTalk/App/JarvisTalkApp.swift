@@ -32,6 +32,7 @@ final class AppHolder: ObservableObject {
     let model: AppModel
     let alerts = PermissionAlerts()
     private let nowPlaying = NowPlayingController()
+    private let inputMute = InputMuteBridge()
     private let network = NetworkMonitor()
     private let permissions = SystemPermissions()
     private var started = false
@@ -49,12 +50,20 @@ final class AppHolder: ObservableObject {
         guard !started else { return }
         started = true
         let call = model.call
+        // every mute trigger ends in the call model, the single source of truth: button, earbud / headset press,
+        // lock screen, system (AirPods / Control Center) mute
         nowPlaying.onToggleMute = { call.toggleMute() }
         nowPlaying.onMute = { call.setMuted($0) }
-        nowPlaying.onEnd = { call.endCall() }
+        inputMute.onSystemChange = { call.setMuted($0) }
+        inputMute.install()
+        call.onMutedChanged = { [weak self] muted in
+            self?.nowPlaying.update(muted: muted)
+            self?.inputMute.push(muted)
+        }
         call.onActiveChanged = { [weak self] on in
             guard let self = self else { return }
             self.nowPlaying.setActive(on, muted: call.muted)
+            self.inputMute.setCall(on)
         }
         network.onChange = { [weak self] online, changed in self?.model.networkChanged(online: online, interfaceChanged: changed) }
         network.start()
