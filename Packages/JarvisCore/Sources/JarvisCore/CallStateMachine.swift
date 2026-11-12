@@ -20,7 +20,11 @@ public struct CallStateMachine: Equatable, Sendable {
         case active             // call_started received, talking
         case held               // socket dropped during a call: audio kept ready, reconnecting
     }
-    public enum Blocker: Equatable, Sendable { case micDenied, micRestricted, audioFailed(String) }
+    public enum Blocker: Equatable, Sendable {
+        case micDenied, micRestricted, audioFailed(String)
+        /// The socket was up but the server never confirmed the call (no `call_started`, or a fatal `voice_error`).
+        case serverUnresponsive(String)
+    }
 
     public enum Event: Equatable, Sendable {
         case launched(paired: Bool, autoStart: Bool)
@@ -41,6 +45,8 @@ public struct CallStateMachine: Equatable, Sendable {
         case mediaServicesReset
         case foregrounded                 // app became active: re-check permission / connection
         case setMuted(Bool)
+        case callStartFailed(String)      // call_start was sent but the server never confirmed it (timeout / fatal voice_error)
+        case retryCall                    // automatic or manual retry after `callStartFailed`
     }
     public enum MicPermission: Equatable, Sendable { case undetermined, granted, denied, restricted }
 
@@ -209,6 +215,15 @@ public struct CallStateMachine: Equatable, Sendable {
 
         case .setMuted(let m):
             muted = m
+
+        case .callStartFailed(let why):
+            guard phase == .waitingServer || phase == .startingAudio else { break }
+            teardown(&fx, sendEnd: false)
+            phase = .blocked(.serverUnresponsive(why))
+            fx.append(.notice(why))
+
+        case .retryCall:
+            if case .blocked(.serverUnresponsive) = phase, wantCall { fx.append(.clearNotice); advance(&fx) }
         }
         return fx
     }

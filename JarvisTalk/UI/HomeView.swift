@@ -67,7 +67,7 @@ struct HomeView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            ConnectionPill(link: app.link)
+            ConnectionPill()
             if let s = deck.status, let spent = s.spentUsd, let budget = s.budgetUsd {
                 Text("\(Format.usd(spent)) / $\(String(format: "%.2f", budget))")
                     .font(.system(size: 11, design: .monospaced)).foregroundColor(Theme.dimText)
@@ -92,8 +92,9 @@ struct HomeView: View {
     // MARK: orb and state
 
     private var orbState: String {
-        if app.link != .online && !call.isActive { return "offline" }
-        return call.isActive ? call.voiceState : "idle"
+        // the orb only shows a live call when the connection is really up; otherwise it is dim
+        if app.display != .connected { return app.display == .online ? "idle" : "offline" }
+        return call.voiceState
     }
 
     private var orb: some View {
@@ -102,14 +103,18 @@ struct HomeView: View {
                            micLevel: { call.micLevel }, outLevel: { call.outLevel })
                 .frame(height: 300)
                 .contentShape(Rectangle())
-                .onTapGesture { if call.isActive { call.toggleMute() } else if !call.wantsCall { call.startCall() } }
+                .onTapGesture {
+                    if app.display.canRetry { app.retryConnection() }
+                    else if call.isActive { call.toggleMute() } else if !call.wantsCall { call.startCall() }
+                }
             Text(statusLine).font(.system(size: 13, weight: .semibold, design: .monospaced)).tracking(2)
                 .foregroundColor(Theme.accentLight(persona)).textCase(.uppercase)
                 .accessibilityLabel("Status: \(statusLine)")
+                .onTapGesture { if app.display.canRetry { app.retryConnection() } }
             if !call.caption.isEmpty {
                 Text(call.caption).font(.callout).foregroundColor(Theme.text).multilineTextAlignment(.center).padding(.horizontal, 8)
                     .transition(.opacity)
-            } else if let last = lastReply {
+            } else if app.display == .connected || app.display == .online, let last = lastReply {
                 Text(last).font(.footnote).foregroundColor(Theme.dimText).multilineTextAlignment(.center).lineLimit(4).padding(.horizontal, 8)
             }
         }
@@ -119,24 +124,18 @@ struct HomeView: View {
     private var lastReply: String? { chat.entries.last(where: { $0.kind == .assistant && !$0.text.isEmpty })?.text }
 
     private var statusLine: String {
-        switch app.link {
-        case .connecting where !call.isActive: return "Connecting to Jarvis"
-        case .reconnecting, .offline: return call.phase == .held ? "Reconnecting call" : (app.link == .offline ? "Offline" : "Reconnecting")
-        case .unauthorized: return "Not paired"
-        default: break
-        }
-        switch call.phase {
-        case .needsPermission: return "Waiting for microphone permission"
-        case .blocked(.micDenied): return "Microphone is off"
-        case .blocked(.micRestricted): return "Microphone restricted"
-        case .blocked(.audioFailed): return "Audio problem"
-        case .startingAudio: return "Starting audio"
-        case .waitingServer: return "Connecting the call"
-        case .held: return "Reconnecting call"
-        case .active:
+        switch app.display {
+        case .connected:
             if call.muted && call.voiceState != "speaking" { return "Muted" }
             switch call.voiceState { case "listening": return "Listening"; case "thinking": return "Thinking"; case "speaking": return "Speaking"; default: return "Connected" }
-        case .idle: return call.wantsCall ? "Connecting" : "Tap to talk"
+        case .callBlocked:
+            switch call.phase {
+            case .blocked(.micDenied): return "Microphone is off"
+            case .blocked(.micRestricted): return "Microphone restricted"
+            case .blocked(.audioFailed): return "Audio problem"
+            default: return app.display.statusText
+            }
+        default: return app.display.statusText
         }
     }
 
@@ -326,19 +325,25 @@ extension CallStateMachine.Phase {
     var isBlocked: Bool { if case .blocked = self { return true }; return false }
 }
 
+/// The header chip. Driven by `AppModel.display`: "online" only when the connection is really up; tap it when it says
+/// "not connected" to retry.
 struct ConnectionPill: View {
-    var link: AppModel.Link
+    @EnvironmentObject var app: AppModel
     var body: some View {
-        let (text, color): (String, Color) = {
-            switch link {
-            case .online: return ("online", Theme.ok)
-            case .connecting: return ("connecting…", Theme.warn)
-            case .reconnecting: return ("reconnecting…", Theme.warn)
-            case .offline: return ("offline", Theme.bad)
-            case .unauthorized: return ("not paired", Theme.bad)
+        let d = app.display
+        let color: Color = {
+            switch d {
+            case .connected, .online, .callBlocked: return Theme.ok
+            case .connecting, .checking, .reconnecting: return Theme.warn
+            case .offline, .failed, .notPaired: return Theme.bad
             }
         }()
-        PillLabel(text: text, color: color).accessibilityLabel("Connection: \(text)")
+        Button { if d.canRetry { app.retryConnection() } } label: {
+            PillLabel(text: d.chipText, color: color)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Connection: \(d.chipText)")
+        .accessibilityHint(d.canRetry ? "Double tap to retry" : "")
     }
 }
 

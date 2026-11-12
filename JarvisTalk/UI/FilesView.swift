@@ -119,7 +119,7 @@ struct FilesView: View {
             }
             .navigationTitle("Files").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { ConnectionPill(link: app.link) }
+                ToolbarItem(placement: .navigationBarLeading) { ConnectionPill() }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack {
                         Menu {

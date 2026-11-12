@@ -56,7 +56,7 @@ final class AppHolder: ObservableObject {
             guard let self = self else { return }
             self.nowPlaying.setActive(on, muted: call.muted)
         }
-        network.onChange = { [weak self] online in self?.model.networkChanged(online: online) }
+        network.onChange = { [weak self] online, changed in self?.model.networkChanged(online: online, interfaceChanged: changed) }
         network.start()
         model.launch()
         log.info("app started, paired: \(self.model.phase == .ready)")

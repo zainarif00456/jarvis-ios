@@ -147,7 +147,7 @@ struct CamerasView: View {
             }
             .navigationTitle("Cameras").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { ConnectionPill(link: app.link) }
+                ToolbarItem(placement: .navigationBarLeading) { ConnectionPill() }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { Task { await discover() } } label: { if discovering { ProgressView() } else { Label("Discover", systemImage: "dot.radiowaves.left.and.right") } }
                         .disabled(discovering)

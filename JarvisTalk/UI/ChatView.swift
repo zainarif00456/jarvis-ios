@@ -59,7 +59,7 @@ struct ChatView: View {
             }
             .navigationTitle("Chat").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { ConnectionPill(link: app.link) }
+                ToolbarItem(placement: .navigationBarLeading) { ConnectionPill() }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack {
                         if chat.busy { Button { chat.interrupt() } label: { Image(systemName: "stop.circle.fill") }.accessibilityLabel("Interrupt Jarvis") }

@@ -47,6 +47,14 @@ public final class CallModel: ObservableObject {
     @Published public private(set) var notice: String?
     @Published public private(set) var route = ""
     @Published public private(set) var micPermission: PermissionState = .undetermined
+    /// The call's audio path is really running: the engine started and no interruption has cut it.
+    @Published public private(set) var audioRunning = false
+    /// Seconds to wait for the server's `call_started` after `call_start` before saying the call failed.
+    public var callStartTimeout: TimeInterval = 15
+    /// Automatic retries after a call that never started (seconds before each); then the owner taps to retry.
+    public var callRetryDelays: [TimeInterval] = [2, 5, 10]
+    /// Fires after every state change: the app model recomputes what it shows.
+    public var onChange: () -> Void = {}
 
     /// Wired by the app model: how to talk to the server.
     public var sendMessage: (ClientMessage) -> Void = { _ in }
@@ -70,6 +78,9 @@ public final class CallModel: ObservableObject {
     private var duckTask: Task<Void, Never>?
     private var frameTask: Task<Void, Never>?
     private var started = false
+    private var startTimer: Task<Void, Never>?
+    private var retryTask: Task<Void, Never>?
+    private var startFailures = 0
     private var lastAudioRestart = Date.distantPast
 
     public init(audio: VoiceAudio, permissions: PermissionProvider) {
@@ -136,6 +147,14 @@ public final class CallModel: ObservableObject {
 
     public func startCall() { run(machine.handle(.userStartCall)); publish() }
     public func endCall() { run(machine.handle(.userEndCall)); publish() }
+    /// Retry a call that never started ("Not connected, tap to retry").
+    public func retryCall() {
+        retryTask?.cancel(); retryTask = nil
+        startFailures = 0
+        run(machine.handle(.retryCall))
+        if machine.phase == .idle, machine.wantCall == false { startCall() }
+        publish()
+    }
     public func toggleCall() { if machine.wantCall || machine.inCall { endCall() } else { startCall() } }
     public func toggleMute() { setMuted(!muted) }
     public func setMuted(_ m: Bool) {
@@ -158,7 +177,9 @@ public final class CallModel: ObservableObject {
         case .voicePartial(let t): caption = t
         case .voiceFinal: caption = ""
         case .voiceStop: audio.cutPlayback(); audio.setDucked(false); pipe.restoreDuck(); duckTask?.cancel()
-        case .voiceError(let text, let recoverable): notice = recoverable ? "Voice hiccup: \(text)" : text
+        case .voiceError(let text, let recoverable):
+            notice = recoverable ? "Voice hiccup: \(text)" : text
+            if !recoverable { callDidNotStart(text) }
         default: break
         }
         publish()
@@ -220,9 +241,47 @@ public final class CallModel: ObservableObject {
         publish()
     }
 
+    /// The server never confirmed the call (timeout or a fatal `voice_error`): say so, then retry by itself a few times.
+    private func callDidNotStart(_ why: String) {
+        let before = machine.phase
+        run(machine.handle(.callStartFailed(why)))
+        guard before != machine.phase else { return }
+        guard startFailures < callRetryDelays.count else { return }
+        let delay = callRetryDelays[startFailures]
+        startFailures += 1
+        retryTask?.cancel()
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self = self else { return }
+            self.retryTask = nil
+            self.run(self.machine.handle(.retryCall)); self.publish()
+        }
+    }
+
+    /// While `call_start` is out (socket welcomed, audio ready) the server has to answer in time.
+    private func watchCallStart() {
+        let waiting = machine.phase == .waitingServer && machine.welcomed
+        if waiting {
+            guard startTimer == nil else { return }
+            startTimer = Task { [weak self] in
+                guard let timeout = self?.callStartTimeout else { return }
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                guard !Task.isCancelled, let self = self else { return }
+                self.startTimer = nil
+                self.callDidNotStart("Jarvis did not answer the call.")
+                self.publish()
+            }
+        } else {
+            startTimer?.cancel(); startTimer = nil
+            if machine.phase == .active { startFailures = 0; retryTask?.cancel(); retryTask = nil }
+        }
+    }
+
     private func publish() {
         let was = phase
         phase = machine.phase
+        audioRunning = machine.audioReady && !machine.interrupted
+        defer { watchCallStart(); onChange() }
         pipe.configure(sending: machine.phase == .active)
         if machine.phase != was {
             if machine.phase == .active { onActiveChanged(true) }

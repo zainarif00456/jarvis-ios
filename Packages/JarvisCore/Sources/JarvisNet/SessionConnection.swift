@@ -48,6 +48,7 @@ public actor SessionConnection {
     private var backoff: Backoff
     private var state: ConnectionState = .idle
     private var wake: CheckedContinuation<Void, Never>?
+    private var currentWatch: Watch?
     private let audioGate = AudioGate()
 
     public init(endpoint: Endpoint, token: String, transport: WebSocketTransport = URLSessionTransport(), config: Config = Config(), visible: @escaping @Sendable () -> Bool = { true }) {
@@ -86,6 +87,35 @@ public actor SessionConnection {
     public func nudge() {
         guard wanted else { return }
         if state != .open { backoff.reset(); wakeUp() }
+    }
+
+    /// Drops the current socket (if any) and reconnects at once: the network path changed (Wi-Fi to mobile data), so the
+    /// old TCP connection is dead even though iOS has not said so yet.
+    public func reconnect() {
+        guard wanted else { return }
+        backoff.reset()
+        if let conn = current {
+            lastClose = "c=1006&h=\(visible() ? 0 : 1)&o=1"
+            conn.close(normal: false)
+        } else { wakeUp() }
+    }
+
+    /// Checks that an open socket really answers: sends a ping and waits for any frame. A socket that stays silent is
+    /// closed so the normal reconnect runs. Returns true when the server answered (or false: not open / dead).
+    public func verify(timeout: TimeInterval = 4) async -> Bool {
+        guard wanted else { return false }
+        guard state == .open, let conn = current, let watch = currentWatch else { nudge(); return false }
+        let since = Date()
+        try? await conn.send(text: ClientMessage.ping.json())
+        let end = since.addingTimeInterval(timeout)
+        while Date() < end {
+            if watch.heard(since: since) { return true }
+            if current !== conn || state != .open { return false }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        if watch.heard(since: since) { return true }
+        if current === conn { lastClose = "c=4000&h=\(visible() ? 0 : 1)&o=1"; conn.close(normal: false) }
+        return false
     }
 
     @discardableResult
@@ -159,6 +189,7 @@ public actor SessionConnection {
         current = conn
         var welcomed = false
         let watch = Watch()
+        currentWatch = watch
         let pinger = Task { [weak self] in
             while !Task.isCancelled {
                 let tick = min(self?.config.pingEvery ?? 15, (self?.config.pongTimeout ?? 20) / 2)
@@ -222,6 +253,7 @@ final class Watch: @unchecked Sendable {
     private var lastRx = Date()
     private var lastPing: Date?
     func heard() { lock.lock(); lastRx = Date(); lock.unlock() }
+    func heard(since: Date) -> Bool { lock.lock(); defer { lock.unlock() }; return lastRx >= since }
     func pinged() { lock.lock(); lastPing = Date(); lock.unlock() }
     /// A new ping is due when none is outstanding and the interval has passed.
     func shouldPing(every: TimeInterval) -> Bool {

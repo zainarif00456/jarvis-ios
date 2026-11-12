@@ -20,6 +20,10 @@ public final class AppModel: ObservableObject {
     /// then offers "Edit address".
     @Published public private(set) var addressProblem: String?
     @Published public private(set) var switching = false
+    /// What the UI may say about the connection. Derived from the REAL socket state, the network path, the call state and
+    /// whether the call audio runs: `.connected` only when the socket is open AND the call is active AND audio is running.
+    @Published public private(set) var display: ConnectionDisplay = .connecting
+    @Published public private(set) var verifying = false
 
     public let settings: SettingsStore
     public let call: CallModel
@@ -28,12 +32,16 @@ public final class AppModel: ObservableObject {
     public let uploads = UploadModel()
     public let platform: Platform
 
+    /// How long a liveness check after the app comes back from the background waits for the server's answer.
+    public var verifyTimeout: TimeInterval = 4
     public private(set) var api: ApiClient?
     private var session: SessionConnection?
     private var eventTask: Task<Void, Never>?
     private var streamHub: [String: TerminalSession] = [:]
     private var cameraStreams: [WeakCamera] = []
     private var probing = false
+    private var reconnectAttempt = 0
+    private var wasBackground = false
     private let visibility = AtomicFlag(true)     // read by the socket when it (re)connects: `v=0|1` in the query
 
     public init(platform: Platform) {
@@ -47,6 +55,7 @@ public final class AppModel: ObservableObject {
         let send: (ClientMessage) -> Bool = { [weak self] m in self?.send(m) ?? false }
         chat.sendMessage = send; deck.sendMessage = send
         call.sendMessage = { [weak self] m in _ = self?.send(m) }
+        call.onChange = { [weak self] in self?.refreshDisplay() }
         call.sendAudioFrame = { [weak self] d in _ = await self?.session?.sendAudio(d) }
         let provider: () -> ApiClient? = { [weak self] in self?.api }
         chat.apiProvider = provider; deck.apiProvider = provider; uploads.apiProvider = provider
@@ -73,11 +82,15 @@ public final class AppModel: ObservableObject {
         eventTask?.cancel()
         let old = session
         Task { await old?.stop() }
+        // closing the old socket ends the call on the server: hold it so the new welcome starts a fresh one (never "active" on a dead call)
+        if old != nil { call.socketDropped() }
         api = ApiClient(endpoint: ep, token: token)
         let s = SessionConnection(endpoint: ep, token: token, transport: platform.transport.make(), visible: { [visibility] in visibility.value })
         session = s
         link = .connecting
+        reconnectAttempt = 0
         addressProblem = nil
+        refreshDisplay()
         eventTask = Task { [weak self] in
             for await event in s.events { guard let self = self else { return }; self.handle(event) }
         }
@@ -223,15 +236,38 @@ public final class AppModel: ObservableObject {
         for w in cameraStreams { w.stream?.retarget(endpoint: ep, token: token) }
     }
 
+    func refreshDisplay() {
+        let socket: ConnectionInputs.Socket
+        switch link {
+        case .connecting: socket = .connecting
+        case .online: socket = .open
+        case .reconnecting, .offline: socket = .reconnecting(attempt: max(1, reconnectAttempt))
+        case .unauthorized: socket = .unauthorized
+        }
+        let next = ConnectionDisplay.resolve(ConnectionInputs(
+            socket: socket, networkOnline: networkOnline, verifying: verifying, addressProblem: addressProblem,
+            callPhase: call.phase, wantsCall: call.wantsCall, audioRunning: call.audioRunning))
+        if next != display { display = next }
+    }
+
+    /// "Not connected, tap to retry": forget the verdict about the address, reconnect at once, retry the call.
+    public func retryConnection() {
+        addressProblem = nil
+        reconnectAttempt = 0
+        call.retryCall()
+        if session == nil { reconnectNow() } else { Task { await session?.nudge() } }
+        refreshDisplay()
+    }
+
     private func checkAddress(attempt: Int) {
-        guard attempt >= 2, !probing, addressProblem == nil, let ep = settings.endpoint else { return }
+        guard attempt >= 1, !probing, addressProblem == nil, let ep = settings.endpoint else { return }
         probing = true
         let token = settings.token
         Task { [weak self] in
             let p = await ApiClient(endpoint: ep, token: token).probe()
             guard let self = self else { return }
             self.probing = false
-            if case .unreachable(let why) = p, self.link != .online { self.addressProblem = why }
+            if case .unreachable(let why) = p, self.link != .online { self.addressProblem = why; self.refreshDisplay() }
         }
     }
 
@@ -252,8 +288,9 @@ public final class AppModel: ObservableObject {
             switch st {
             case .idle: break
             case .connecting: link = .connecting
-            case .open: link = .online; addressProblem = nil
+            case .open: link = .online; addressProblem = nil; reconnectAttempt = 0
             case .reconnecting(let attempt):
+                reconnectAttempt = attempt
                 link = networkOnline ? .reconnecting : .offline; call.socketDropped()
                 if networkOnline { checkAddress(attempt: attempt) }
             case .unauthorized:
@@ -264,6 +301,7 @@ public final class AppModel: ObservableObject {
                 pairingError = "This phone is not paired on this address (or was removed from Jarvis). Pair it with a new code."
                 phase = .needsPairing
             }
+            refreshDisplay()
         case .audio(let d): call.receiveSpeech(d)
         case .message(let m): route(m)
         }
@@ -289,18 +327,38 @@ public final class AppModel: ObservableObject {
     // MARK: lifecycle
 
     public func sceneBecameActive() {
+        let fromBackground = wasBackground
+        wasBackground = false
         isForeground = true; visibility.value = true
         send(.presence(visible: true))
         call.appBecameActive()
-        Task { await session?.nudge() }
+        if case .blocked(.serverUnresponsive) = call.phase { call.retryCall() }
+        guard let s = session else { return }
+        if fromBackground && link == .online {
+            // the socket may have died while the app slept: do not trust it until the server answers a ping
+            verifying = true; refreshDisplay()
+            Task { [weak self] in
+                _ = await s.verify(timeout: self?.verifyTimeout ?? 4)
+                guard let self = self else { return }
+                self.verifying = false; self.refreshDisplay()
+            }
+        } else {
+            Task { await s.nudge() }
+        }
     }
     public func sceneBecameInactive(background: Bool) {
+        if background { wasBackground = true }
         isForeground = false; visibility.value = false
         send(.presence(visible: false))
     }
-    public func networkChanged(online: Bool) {
+    /// The network path changed. `interfaceChanged`: still online but over another interface (Wi-Fi to mobile data), so
+    /// the old socket is dead: reconnect now instead of waiting for the watchdog.
+    public func networkChanged(online: Bool, interfaceChanged: Bool = false) {
         networkOnline = online
-        if online { Task { await session?.nudge() } } else if link != .online { link = .offline }
+        if online {
+            if interfaceChanged { Task { await session?.reconnect() } } else { Task { await session?.nudge() } }
+        } else if link != .online { link = .offline }
+        refreshDisplay()
     }
 
     // MARK: terminals (kept alive while the app runs so switching tabs does not drop them)

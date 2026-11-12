@@ -1,3 +1,45 @@
+# ROUND 2 (2026-11-13): phases, in the owner's order
+
+No SwiftUI / UIKit / AVFoundation code from this round has been compiled or seen on a device. Logic is tested with the Swift
+Linux toolchain (`swift test`); the UI passes `swiftc -parse` only.
+
+## Phase 1: "CONNECTED but not really" on app open: DONE (logic tested), UI unverified
+
+**Cause (found by reading the code):** the header chip said "online" as soon as the socket received `welcome`
+(`AppModel.link == .online`), and the status line said "Connected" from the call phase alone. Nothing looked at whether the call audio
+path was running, nothing timed out a `call_start` that the server never answered (a fatal `voice_error` left the call stuck
+in "connecting the call" under a green chip), a socket that died while the app slept was trusted until the 15 s ping noticed, and
+switching the address closed the old socket (the server ends the call on that) while the call state machine still said "active"
+and never started a new call on the new socket.
+
+**Fix:** `JarvisCore/ConnectionDisplay.swift` is a pure function of real facts (socket state, network path, liveness check,
+call phase, audio engine running, address problem). `AppModel.display` publishes it; the chip, status line and orb use only
+that. `.connected` needs socket open AND call active AND audio running AND no liveness check pending. States:
+Connecting... / Checking connection... / Connected / Reconnecting... / Offline / Not connected, tap to retry (also the chip,
+the orb and the status line are tappable) / Tap to talk (call ended on purpose) / Call blocked (microphone).
+* Call-start watchdog (`CallModel`): 15 s after `call_start`, or at once on a fatal `voice_error`, the call is declared failed, audio is
+  torn down, it retries by itself after 2 s, 5 s, 10 s, then waits for a tap (`AppModel.retryConnection`).
+* Socket retry/backoff existed (0.25 s, 1, 2, 4 ... 15 s); after 4 failed attempts the UI says "Not connected, tap to retry".
+  The address probe now runs from the first failed attempt: an HTML page (ngrok interstitial) or refused connection becomes the
+  explanation and "Edit address" shows.
+* Back from the background: the socket is pinged and must answer within 4 s ("Checking connection..."); a silent socket is
+  closed and reconnected, the held call resumes. Wi-Fi <-> mobile data (`NetworkMonitor` notices the interface change) drops the
+  old socket at once. Address switch / edit holds the call so the new welcome starts a fresh one.
+* Tests (fake socket): server unreachable; socket opens but the call never starts (auto-retry, give up, manual retry, connected
+  for real); fatal voice_error; resume from background with a live and with a dead socket; Wi-Fi to mobile; offline and back;
+  address switch; plus pure-function tests of every display rule.
+* Not verified: a real ngrok interstitial (tested against the local gateway's HTML page earlier, and by unit tests only), a real
+  Wi-Fi to mobile switch, real background suspension.
+
+**Test on the phone (Phase 1):**
+1. Force-quit the app, open it: chip says "connecting..." then "online", the status "Connecting..." then "Connected" ONLY once you
+   can talk to him (say something: the orb goes Listening). Mic permission prompt on first run still works.
+2. Stop the Jarvis server (or switch Wi-Fi off and on the tunnel): status goes Reconnecting..., then "Not connected, tap to retry"
+   within ~10 s; start the server again, tap it: Connected.
+3. Put the app in the background for a minute, come back: briefly "Checking connection...", then Connected (or reconnects).
+4. Wi-Fi -> mobile data with the app open: Reconnecting... then Connected within a few seconds, call resumes.
+5. Point the address at an ngrok URL that shows the browser warning page: "Not connected" + the "Edit address" card.
+
 # STATUS (written 2026-11-12, on the Linux laptop; nothing here has run on a Mac or an iPhone yet)
 
 ## In one paragraph

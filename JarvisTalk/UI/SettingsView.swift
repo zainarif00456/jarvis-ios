@@ -83,7 +83,7 @@ struct SettingsView: View {
     }
 
     private var linkText: String {
-        switch app.link { case .online: return "online"; case .connecting: return "connecting…"; case .reconnecting: return "reconnecting…"; case .offline: return "offline"; case .unauthorized: return "not paired" }
+        return app.display.chipText
     }
 
     private func row(_ k: String, _ v: String) -> some View {
