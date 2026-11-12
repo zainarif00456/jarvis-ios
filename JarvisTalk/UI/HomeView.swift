@@ -160,12 +160,7 @@ struct HomeView: View {
                 .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.8)
                 .accessibilityLabel("Status: \(statusLine)")
                 .onTapGesture { if app.display.canRetry { app.retryConnection() } }
-            if !call.caption.isEmpty {
-                Text(call.caption).font(.callout).foregroundColor(Theme.text).multilineTextAlignment(.center).padding(.horizontal, 8)
-                    .transition(.opacity)
-            } else if app.display == .connected || app.display == .online, let last = lastReply {
-                Text(last).font(.footnote).foregroundColor(Theme.dimText).multilineTextAlignment(.center).lineLimit(4).padding(.horizontal, 8)
-            }
+            // Voice call screen shows only the status: spoken text (live captions, last reply) lives in Chat.
         }
     }
 
