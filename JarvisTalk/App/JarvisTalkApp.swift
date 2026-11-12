@@ -17,6 +17,11 @@ struct JarvisTalkApp: App {
                 .environmentObject(holder.model.deck)
                 .environmentObject(holder.model.uploads)
                 .environmentObject(holder.model.settings)
+                .environmentObject(holder.model.exec)
+                .environmentObject(holder.model.portals)
+                .environmentObject(holder.model.debrief)
+                .environmentObject(holder.model.briefing)
+                .environmentObject(holder.model.screen)
                 .environmentObject(holder.alerts)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent(.jarvis))
@@ -88,10 +93,12 @@ struct RootView: View {
     @EnvironmentObject var alerts: PermissionAlerts
 
     var body: some View {
-        Group {
-            switch app.phase {
-            case .needsPairing: PairingView()
-            case .ready: MainTabs()
+        FXScope {
+            Group {
+                switch app.phase {
+                case .needsPairing: PairingView()
+                case .ready: MainTabs()
+                }
             }
         }
         .permissionAlert(alerts)
@@ -110,19 +117,20 @@ struct MainTabs: View {
         TabView(selection: $tab) {
             HomeView(goTo: { tab = $0 }).tag(Tab.home)
                 .tabItem { Label("Jarvis", systemImage: "waveform.circle.fill") }
-            ChatView().tag(Tab.chat)
+            ChatView().edgeSwipeBack().tag(Tab.chat)
                 .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }
                 .badge(deck.attention)
-            TerminalsView().tag(Tab.terminal)
+            TerminalsView().edgeSwipeBack().tag(Tab.terminal)
                 .tabItem { Label("Terminal", systemImage: "terminal.fill") }
                 .badge(deck.terminals.count)
-            CamerasView(isVisible: tab == .cameras).tag(Tab.cameras)
+            CamerasView(isVisible: tab == .cameras).edgeSwipeBack().tag(Tab.cameras)
                 .tabItem { Label("Cameras", systemImage: "video.fill") }
-            FilesView().tag(Tab.files)
+            FilesView().edgeSwipeBack().tag(Tab.files)
                 .tabItem { Label("Files", systemImage: "folder.fill") }
                 .badge(deck.unseenFiles)
         }
         .environment(\.currentTab, tab)
+        .environment(\.goHome, { tab = .home })
     }
 }
 

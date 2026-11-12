@@ -290,7 +290,7 @@ struct TerminalsView: View {
             }
             .navigationTitle("Terminal").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { ConnectionPill() }
+                ToolbarItemGroup(placement: .navigationBarLeading) { BackToJarvisButton(); ConnectionPill() }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack {
                         Menu {

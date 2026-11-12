@@ -216,3 +216,16 @@ struct EdgeSwipeBack: ViewModifier {
 extension View {
     func edgeSwipeBack() -> some View { modifier(EdgeSwipeBack()) }
 }
+
+private struct ClosePortalKey: EnvironmentKey { static let defaultValue: () -> Void = {} }
+extension EnvironmentValues { var closePortal: () -> Void { get { self[ClosePortalKey.self] } set { self[ClosePortalKey.self] = newValue } } }
+
+/// "Close": dismisses a sheet, or closes the portal this screen is shown in.
+struct SmartCloseButton: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.embeddedInPortal) private var embedded
+    @Environment(\.closePortal) private var closePortal
+    var body: some View {
+        Button("Close") { if embedded { closePortal() } else { dismiss() } }.accessibilityLabel("Close")
+    }
+}

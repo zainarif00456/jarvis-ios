@@ -38,7 +38,7 @@ struct MediaView: View {
         .overlay { if deck.media.isEmpty { EmptyHint(icon: "photo.on.rectangle", title: "The media library is empty", detail: "Photos and clips from your cameras and this phone show up here.") } }
         .navigationTitle("Media").navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            ToolbarItem(placement: .cancellationAction) { SmartCloseButton() }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button { picker.choosePhoto(to: .media) } label: { Label("Photo library…", systemImage: "photo") }
@@ -111,7 +111,7 @@ struct SchedulesView: View {
         .overlay { if deck.schedules.items.isEmpty { EmptyHint(icon: "calendar.badge.clock", title: "Nothing scheduled", detail: "Ask Jarvis to remind you, or add one with +.") } }
         .navigationTitle("Schedules").navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            ToolbarItem(placement: .cancellationAction) { SmartCloseButton() }
             ToolbarItem(placement: .primaryAction) { Button { creating = true } label: { Image(systemName: "plus") }.accessibilityLabel("New schedule") }
         }
         .refreshable { await deck.loadSchedules() }
@@ -228,7 +228,7 @@ struct ActivityView: View {
         }
         .listStyle(.insetGrouped).scrollContentBackground(.hidden).background(Theme.void)
         .navigationTitle("Activity").navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        .toolbar { ToolbarItem(placement: .cancellationAction) { SmartCloseButton() } }
         .task { await deck.loadRecordings() }
     }
     private func color(_ t: TaskInfo) -> Color { t.status == "done" ? Theme.ok : (t.isActive ? Theme.warn : Theme.bad) }
@@ -271,7 +271,7 @@ struct SessionsView: View {
         .onChange(of: query) { q in Task { await deck.searchSessions(q) } }
         .navigationTitle("Sessions").navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            ToolbarItem(placement: .cancellationAction) { SmartCloseButton() }
             ToolbarItem(placement: .primaryAction) { Button { Task { message = await deck.newSession(); await deck.loadSessions() } } label: { Label("New session", systemImage: "plus.bubble") } }
         }
         .task { await deck.loadSessions() }

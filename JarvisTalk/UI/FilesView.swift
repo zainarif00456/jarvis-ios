@@ -119,7 +119,7 @@ struct FilesView: View {
             }
             .navigationTitle("Files").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { ConnectionPill() }
+                ToolbarItemGroup(placement: .navigationBarLeading) { BackToJarvisButton(); ConnectionPill() }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack {
                         Menu {
@@ -236,7 +236,7 @@ struct FilePreviewView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.void)
         .navigationTitle(file.name).navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            ToolbarItem(placement: .cancellationAction) { SmartCloseButton() }
             ToolbarItem(placement: .primaryAction) { ShareFileButton(file: file) { shareURL = $0; showShare = true } }
         }
         .background(ShareSheetPresenter(isPresented: $showShare, url: shareURL))

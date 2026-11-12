@@ -314,10 +314,10 @@ struct ChartScene: View {
             let vals = (chart.series.first?.values ?? []).map { max(0, $0 ?? 0) }
             let total = vals.reduce(0, +); guard total > 0 else { return }
             let c = CGPoint(x: area.midX, y: area.midY); let r = min(area.width, area.height) / 2
-            var start = Angle.degrees(-90)
+            var start = -Double.pi / 2
             for (i, v) in vals.enumerated() {
-                let end = start + .degrees(360 * v / total)
-                var p = Path(); p.addArc(center: c, radius: r - 8, startAngle: start, endAngle: end, clockwise: false)
+                let end = start + 2 * Double.pi * v / total
+                var p = Path(); p.addArc(center: c, radius: r - 8, startAngle: .radians(start), endAngle: .radians(end), clockwise: false)
                 ctx.stroke(p, with: .color(Self.color(i)), style: StrokeStyle(lineWidth: 16))
                 start = end
             }
