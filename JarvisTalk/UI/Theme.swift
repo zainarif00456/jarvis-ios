@@ -37,6 +37,15 @@ struct StageBackground: View {
         ZStack {
             Theme.void
             RadialGradient(colors: [accent.opacity(0.14), .clear], center: .init(x: 0.5, y: 0.25), startRadius: 0, endRadius: 420)
+            // a faint hologram floor grid, drawn once (no animation, no per-frame cost)
+            Canvas { ctx, size in
+                var x: CGFloat = 0
+                while x <= size.width { ctx.fill(Path(CGRect(x: x, y: 0, width: 0.5, height: size.height)), with: .color(accent.opacity(0.035))); x += 36 }
+                var y: CGFloat = 0
+                while y <= size.height { ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 0.5)), with: .color(accent.opacity(0.035))); y += 36 }
+            }
+            .mask(LinearGradient(colors: [.clear, .black, .black, .clear], startPoint: .top, endPoint: .bottom))
+            .allowsHitTesting(false)
         }.ignoresSafeArea()
     }
 }

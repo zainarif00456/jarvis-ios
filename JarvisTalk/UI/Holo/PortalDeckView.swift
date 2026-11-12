@@ -20,50 +20,133 @@ struct CoreDock: View {
     var items: [DockItem]
     var size: CGSize                // the area around the orb
     @Environment(\.calmFX) private var calm
+    @State private var formed = false
+    @State private var spin = false
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: calm ? 3600 : 1.0 / 12, paused: calm)) { tl in
-            let t = calm ? 0 : tl.date.timeIntervalSinceReferenceDate
-            ZStack {
-                ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
-                    let p = position(i, count: items.count, t: t)
-                    DockButton(item: item).position(x: p.x, y: p.y)
-                }
+        ZStack {
+            orbitRings
+            ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
+                let p = position(i, count: items.count)
+                // each panel forms out of the core: from its own spot to the centre and back
+                DockButton(item: item, index: i, formed: formed)
+                    .offset(formed ? .zero : CGSize(width: size.width / 2 - p.x, height: size.height / 2 - p.y))
+                    .scaleEffect(formed || calm ? 1 : 0.2)
+                    .opacity(formed ? 1 : 0)
+                    .animation(calm ? .easeInOut(duration: 0.15) : .spring(response: 0.6, dampingFraction: 0.72).delay(Double(i) * 0.05), value: formed)
+                    .position(x: p.x, y: p.y)
             }
         }
         .frame(width: size.width, height: size.height)
+        .onAppear { formed = true; if !calm { spin = true } }
+        .onDisappear { formed = false; spin = false }
     }
 
-    /// Evenly on an ellipse around the orb, each floating a little.
-    private func position(_ i: Int, count: Int, t: Double) -> CGPoint {
-        let rx = min(size.width / 2 - 34, 158), ry = min(size.height / 2 - 34, 128)
+    /// Two faint tilted orbit rings behind the panels: depth, drawn once and spun by the compositor (no per-frame work).
+    @ViewBuilder private var orbitRings: some View {
+        let rx = min(size.width / 2 - 34, 158), ry = min(size.height / 2 - 36, 128)
+        let tint = Theme.accent(.jarvis)
+        ZStack {
+            Ellipse().stroke(tint.opacity(0.22), style: StrokeStyle(lineWidth: 1, dash: [2, 7]))
+                .frame(width: rx * 2, height: ry * 2)
+                .rotationEffect(.degrees(spin ? 360 : 0))
+                .animation(calm ? nil : .linear(duration: 90).repeatForever(autoreverses: false), value: spin)
+            Ellipse().stroke(tint.opacity(0.14), lineWidth: 0.7)
+                .frame(width: rx * 2 - 26, height: ry * 2 - 22)
+            Ellipse().stroke(LinearGradient(colors: [tint.opacity(0.0), tint.opacity(0.35), tint.opacity(0.0)], startPoint: .leading, endPoint: .trailing), lineWidth: 1)
+                .frame(width: rx * 2 + 22, height: ry * 2 + 18)
+        }
+        .opacity(formed ? 1 : 0)
+        .animation(.easeOut(duration: 0.6), value: formed)
+        .allowsHitTesting(false)
+    }
+
+    /// Evenly on an ellipse around the orb.
+    private func position(_ i: Int, count: Int) -> CGPoint {
+        let rx = min(size.width / 2 - 34, 158), ry = min(size.height / 2 - 36, 128)
         let a = -Double.pi / 2 + 2 * Double.pi * Double(i) / Double(max(count, 1)) + Double.pi / Double(max(count, 1))
-        let bob = sin(t * 0.9 + Double(i) * 1.7) * 3
-        return CGPoint(x: size.width / 2 + CGFloat(cos(a)) * rx, y: size.height / 2 + CGFloat(sin(a)) * ry + CGFloat(bob))
+        return CGPoint(x: size.width / 2 + CGFloat(cos(a)) * rx, y: size.height / 2 + CGFloat(sin(a)) * ry)
     }
 }
 
+/// A small holographic glass panel: tinted glass, feathered edge, corner nodes, a shimmer that crosses it now and then,
+/// and a slow float with a touch of perspective. The motion is compositor-driven (repeating animations), not a per-frame redraw.
 struct DockButton: View {
     var item: DockItem
+    var index: Int = 0
+    var formed: Bool = true
+    @Environment(\.calmFX) private var calm
+    @State private var bob = false
+    @State private var shimmer = false
+    private let tint = Theme.accent(.jarvis)
+    private let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
+
     var body: some View {
         Button(action: item.action) {
-            VStack(spacing: 2) {
+            VStack(spacing: 3) {
                 ZStack(alignment: .topTrailing) {
-                    Image(systemName: item.symbol).font(.system(size: 17, weight: .semibold)).foregroundColor(Theme.accentLight(.jarvis))
-                        .frame(width: 46, height: 46)
-                        .background(Circle().fill(RadialGradient(colors: [Theme.accent(.jarvis).opacity(0.30), Theme.panel.opacity(0.92)], center: .center, startRadius: 0, endRadius: 30)))
-                        .overlay(Circle().stroke(Theme.accent(.jarvis).opacity(0.55), lineWidth: 1))
-                        .shadow(color: Theme.accent(.jarvis).opacity(0.5), radius: 8)
+                    Image(systemName: item.symbol).font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.accentLight(.jarvis))
+                        .shadow(color: tint.opacity(0.8), radius: 5)
+                        .frame(width: 30, height: 26)
                     if item.badge > 0 {
                         Text(item.badge > 9 ? "9+" : "\(item.badge)").font(.system(size: 9, weight: .bold)).foregroundColor(.white)
-                            .padding(.horizontal, 4).frame(minWidth: 15, minHeight: 15).background(Capsule().fill(Theme.hot)).offset(x: 4, y: -3)
+                            .padding(.horizontal, 4).frame(minWidth: 15, minHeight: 15).background(Capsule().fill(Theme.hot)).offset(x: 8, y: -5)
                     }
                 }
-                Text(item.title).font(.system(size: 9, weight: .medium)).foregroundColor(Theme.text.opacity(0.85)).lineLimit(1).fixedSize()
+                Text(item.title).font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundColor(Theme.text.opacity(0.9))
+                    .lineLimit(1).minimumScaleFactor(0.7).padding(.horizontal, 3)
             }
+            .frame(width: 64, height: 56)
+            .background(glass)
+            .overlay(shimmerBand)
+            .overlay(shape.strokeBorder(LinearGradient(colors: [tint.opacity(0.9), tint.opacity(0.15), tint.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+            .overlay(corners)
+            .clipShape(shape)
+            .shadow(color: tint.opacity(0.45), radius: 9, y: 3)
+            .contentShape(shape)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(HoloPressStyle())
+        .offset(y: calm ? 0 : (bob ? 3 : -3))
+        .rotation3DEffect(.degrees(calm ? 0 : (bob ? 5 : -5)), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
+        .animation(calm ? nil : .easeInOut(duration: 2.4 + Double(index % 4) * 0.35).repeatForever(autoreverses: true), value: bob)
+        .onAppear { if !calm { bob = true; shimmer = true } }
         .accessibilityLabel(item.badge > 0 ? "\(item.title), \(item.badge) new" : item.title)
+    }
+
+    private var glass: some View {
+        ZStack {
+            shape.fill(LinearGradient(colors: [tint.opacity(0.30), Theme.panel.opacity(0.9), Theme.void.opacity(0.95)], startPoint: .top, endPoint: .bottom))
+            shape.fill(.ultraThinMaterial).opacity(0.25)
+            RadialGradient(colors: [tint.opacity(0.28), .clear], center: .top, startRadius: 0, endRadius: 46)
+        }
+    }
+
+    private var shimmerBand: some View {
+        GeometryReader { g in
+            LinearGradient(colors: [.clear, Theme.text.opacity(0.22), .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: g.size.width * 0.5).rotationEffect(.degrees(18))
+                .offset(x: shimmer ? g.size.width * 1.1 : -g.size.width * 0.8)
+                .animation(calm ? nil : .easeInOut(duration: 1.6).delay(Double(index) * 0.45).repeatForever(autoreverses: false), value: shimmer)
+        }.allowsHitTesting(false)
+    }
+
+    private var corners: some View {
+        GeometryReader { g in
+            ForEach(0..<2, id: \.self) { i in
+                Circle().fill(Theme.text).frame(width: 3, height: 3).shadow(color: tint, radius: 3)
+                    .position(x: i == 0 ? 5 : g.size.width - 5, y: i == 0 ? 5 : g.size.height - 5)
+            }
+        }.allowsHitTesting(false)
+    }
+}
+
+/// Press feedback: the panel sinks and brightens.
+struct HoloPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .brightness(configuration.isPressed ? 0.15 : 0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 
@@ -79,11 +162,14 @@ struct PortalStage: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                if portals.visible.contains(where: { $0.full }) { Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity) }
+                if portals.visible.contains(where: { $0.full }) {
+                    Color.black.opacity(0.5).overlay(RadialGradient(colors: [Theme.accent(.jarvis).opacity(0.18), .clear], center: .top, startRadius: 0, endRadius: 420))
+                        .ignoresSafeArea().transition(.opacity)
+                }
                 ForEach(portals.portals) { p in
                     if !p.minimised {
                         PortalWindow(portal: p, stage: geo.size, picker: picker)
-                            .transition(.fromCore(CGSize(width: 0, height: -geo.size.height * 0.35), calm: calm))
+                            .transition(.fromCore(CGSize(width: 0, height: -geo.size.height * 0.35), calm: calm, laser: true))
                             .zIndex(Double(p.z))
                     }
                 }
@@ -127,6 +213,8 @@ struct PortalWindow: View {
     @EnvironmentObject var portals: PortalModel
     @GestureState private var drag: CGSize = .zero
     @GestureState private var pinch: CGFloat = 1
+    @Environment(\.calmFX) private var calm
+    @State private var float = false
 
     private var frame: PRect {
         portal.full ? PRect(x: 8, y: 8, w: Double(stage.width) - 16, h: Double(stage.height) - 16) : portal.rect
@@ -147,6 +235,12 @@ struct PortalWindow: View {
         .frame(width: CGFloat(r.w), height: CGFloat(r.h))
         .holoPlate(tint, active: active, corner: 18)
         .scaleEffect(CGFloat(portal.scale) * pinch)
+        // depth: the plate leans a little toward the finger while dragged, and the one in front floats gently
+        .rotation3DEffect(.degrees(calm ? 0 : Double(drag.width) / 28), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
+        .rotation3DEffect(.degrees(calm ? 0 : Double(-drag.height) / 40), axis: (x: 1, y: 0, z: 0), perspective: 0.5)
+        .offset(y: (calm || portal.full || !active) ? 0 : (float ? 2.5 : -2.5))
+        .animation(calm ? nil : .easeInOut(duration: 3.2).repeatForever(autoreverses: true), value: float)
+        .onAppear { if !calm { float = true } }
         .position(x: CGFloat(r.centerX) + drag.width, y: CGFloat(r.centerY) + drag.height)
         .simultaneousGesture(MagnificationGesture().updating($pinch) { v, s, _ in s = v }.onEnded { portals.zoom(portal.id, by: Double($0)) })
         .simultaneousGesture(TapGesture().onEnded { if !active { portals.raise(portal.id) } })

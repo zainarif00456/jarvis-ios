@@ -111,14 +111,22 @@ extension View {
 
 // MARK: forming out of the core and melting back
 
-/// Scale + offset + fade + blur between "at the core" and "formed".
+/// Scale + offset + fade + blur between "at the core" and "formed". With `laser` it opens like the browser's portals:
+/// a thin bright line first, then the plate unfolds (the spring overshoots a touch).
 struct CoreForm: ViewModifier {
     var formed: Bool
     var toCore: CGSize          // vector from the card's resting place to the orb
     var calm: Bool
+    var laser: Bool = false
     func body(content: Content) -> some View {
         if calm {
             content.opacity(formed ? 1 : 0)
+        } else if laser {
+            content
+                .scaleEffect(x: formed ? 1 : 0.08, y: formed ? 1 : 0.012, anchor: .center)
+                .offset(formed ? .zero : toCore)
+                .opacity(formed ? 1 : 0)
+                .blur(radius: formed ? 0 : 4)
         } else {
             content
                 .scaleEffect(formed ? 1 : 0.18, anchor: .center)
@@ -130,8 +138,8 @@ struct CoreForm: ViewModifier {
 }
 extension AnyTransition {
     /// A card that forms out of the core (insertion) and melts back into it (removal).
-    static func fromCore(_ toCore: CGSize, calm: Bool) -> AnyTransition {
-        .modifier(active: CoreForm(formed: false, toCore: toCore, calm: calm), identity: CoreForm(formed: true, toCore: toCore, calm: calm))
+    static func fromCore(_ toCore: CGSize, calm: Bool, laser: Bool = false) -> AnyTransition {
+        .modifier(active: CoreForm(formed: false, toCore: toCore, calm: calm, laser: laser), identity: CoreForm(formed: true, toCore: toCore, calm: calm, laser: laser))
     }
 }
 
@@ -199,22 +207,79 @@ private struct GoHomeKey: EnvironmentKey { static let defaultValue: () -> Void =
 extension EnvironmentValues { var goHome: () -> Void { get { self[GoHomeKey.self] } set { self[GoHomeKey.self] = newValue } } }
 
 /// Swipe in from the left edge to go back to Jarvis (screens pushed inside a NavigationStack keep their own back swipe).
+/// The same modifier gives every bottom-bar screen its holographic entrance (it forms, a scan line crosses it, a light frame
+/// settles around it) and the same screen melts as it leaves.
 struct EdgeSwipeBack: ViewModifier {
     @Environment(\.goHome) private var goHome
     @Environment(\.embeddedInPortal) private var embedded
     func body(content: Content) -> some View {
-        content.overlay(alignment: .leading) {
-            if !embedded {
-                Color.clear.frame(width: 18).contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 24).onEnded { v in
-                        if v.translation.width > 70 && abs(v.translation.height) < 90 { goHome() }
-                    })
+        content
+            .overlay(alignment: .leading) {
+                if !embedded {
+                    Color.clear.frame(width: 18).contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 24).onEnded { v in
+                            if v.translation.width > 70 && abs(v.translation.height) < 90 { goHome() }
+                        })
+                }
             }
-        }
+            .modifier(HoloScreenEntrance(enabled: !embedded))
     }
 }
 extension View {
     func edgeSwipeBack() -> some View { modifier(EdgeSwipeBack()) }
+}
+
+/// Entrance for a full screen: unfolds from the centre with a spring, one scan line, and a glass frame. Reduce Motion /
+/// Low Power / calm: a plain fade. Touches pass straight through the decoration.
+struct HoloScreenEntrance: ViewModifier {
+    var enabled: Bool
+    @Environment(\.calmFX) private var calm
+    @State private var shown = false
+    @State private var scan: CGFloat = -0.1
+
+    func body(content: Content) -> some View {
+        if !enabled { content } else {
+            content
+                .opacity(shown ? 1 : 0)
+                .scaleEffect(calm ? 1 : (shown ? 1 : 0.94), anchor: .center)
+                .blur(radius: calm ? 0 : (shown ? 0 : 5))
+                .overlay(frame)
+                .overlay(scanLine)
+                .onAppear {
+                    if calm { withAnimation(.easeOut(duration: 0.15)) { shown = true }; return }
+                    withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) { shown = true }
+                    scan = -0.1
+                    withAnimation(.easeInOut(duration: 0.8)) { scan = 1.1 }
+                }
+                .onDisappear { shown = false; scan = -0.1 }
+        }
+    }
+
+    private var frame: some View {
+        GeometryReader { g in
+            let tint = Theme.accent(.jarvis)
+            ZStack {
+                ForEach(0..<4, id: \.self) { i in
+                    Circle().fill(Theme.text).frame(width: 4, height: 4).shadow(color: tint, radius: 4)
+                        .position(x: i % 2 == 0 ? 6 : g.size.width - 6, y: i < 2 ? 6 : g.size.height - 6)
+                }
+                Rectangle().fill(LinearGradient(colors: [.clear, tint.opacity(0.7), .clear], startPoint: .leading, endPoint: .trailing))
+                    .frame(height: 1).position(x: g.size.width / 2, y: 0.5)
+            }
+            .opacity(shown ? 0.85 : 0)
+        }.allowsHitTesting(false)
+    }
+
+    @ViewBuilder private var scanLine: some View {
+        if !calm {
+            GeometryReader { g in
+                let tint = Theme.accent(.jarvis)
+                LinearGradient(colors: [.clear, tint.opacity(0.35), Theme.text.opacity(0.5), tint.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 36).offset(y: scan * g.size.height - 18)
+                    .opacity(shown && scan < 1.05 ? 1 : 0)
+            }.allowsHitTesting(false)
+        }
+    }
 }
 
 private struct ClosePortalKey: EnvironmentKey { static let defaultValue: () -> Void = {} }

@@ -262,3 +262,20 @@ About 3000 lines of SwiftUI / UIKit / AVFoundation / CoreMedia / Security / Netw
   code `4401`, so a revoked device is detected by `GET /api/session` returning `paired:false`.
 * Plain `http://` addresses are accepted only for local-network addresses (App Transport Security `NSAllowsLocalNetworking`).
 * Xcode 15 or newer is assumed (UIKit is main-actor annotated there); the project builds in Swift 5 language mode.
+
+## Visual polish pass (UNVERIFIED on device; SwiftUI cannot be compiled here, files were only `swiftc -parse`d)
+
+* Home: the launcher ring is now eight holographic glass panels (tinted glass, feathered edge, corner nodes, a shimmer
+  that crosses each, slow float with a little perspective, press feedback) on faint tilted orbit rings. They form out of the
+  core with a staggered spring when Home appears and melt back when it leaves.
+* Opened portals open like the browser's: a thin bright line, then the plate unfolds with a springy overshoot, and melts back
+  into the core on close. The front portal floats gently and leans toward the finger while dragged. A full-screen portal gets
+  a glow behind it.
+* Bottom-bar screens (Chat, Terminal, Cameras, Files) get an entrance: they unfold with a spring, one scan line crosses them,
+  and a light frame with corner nodes settles around them. Screens have a faint hologram floor grid (drawn once).
+* Fixes: "Who answers the call" no longer shows Jarvis twice (display-only dedupe; what is sent is unchanged). The
+  "Microphone muted" pill moved out of the orb overlay into the caption under the ring, so it can no longer cover portals.
+* Performance: the new motion is repeating compositor animations (no per-frame redraw); Reduce Motion, Low Power Mode and
+  Settings > Effects > Calm turn it into plain fades with no repeating motion.
+* Please check on the phone: ring panel spacing on a small phone and at large Dynamic Type, the portal open/close feel,
+  frame rate on Home with all eight panels floating, and that the tab-screen entrance does not flash on tab switches.

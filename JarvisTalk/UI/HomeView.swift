@@ -129,6 +129,7 @@ struct HomeView: View {
             }.frame(height: 330)
             orbCaption
         }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: call.muted)
     }
 
     private var orbCore: some View {
@@ -138,14 +139,6 @@ struct HomeView: View {
                 .opacity(call.muted ? 0.4 : 1)                       // muted: the orb dims
                 .saturation(call.muted ? 0.3 : 1)
                 .animation(.easeInOut(duration: 0.25), value: call.muted)
-                .overlay(alignment: .bottom) {
-                    if call.muted {
-                        Label("Microphone muted", systemImage: "mic.slash.fill").font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(Theme.warn).padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(Capsule().fill(Color.black.opacity(0.5))).overlay(Capsule().stroke(Theme.warn.opacity(0.7)))
-                            .transition(.opacity)
-                    }
-                }
                 .contentShape(Rectangle())
                 .onTapGesture {
                     if app.display.canRetry { app.retryConnection() }
@@ -155,8 +148,16 @@ struct HomeView: View {
 
     private var orbCaption: some View {
         VStack(spacing: 6) {
+            // the muted pill lives here, in the flow under the portal ring, so it can never sit on a portal
+            if call.muted {
+                Label("Microphone muted", systemImage: "mic.slash.fill").font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.warn).padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Capsule().fill(Color.black.opacity(0.5))).overlay(Capsule().stroke(Theme.warn.opacity(0.7)))
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
             Text(statusLine).font(.system(size: 13, weight: .semibold, design: .monospaced)).tracking(2)
                 .foregroundColor(Theme.accentLight(persona)).textCase(.uppercase)
+                .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.8)
                 .accessibilityLabel("Status: \(statusLine)")
                 .onTapGesture { if app.display.canRetry { app.retryConnection() } }
             if !call.caption.isEmpty {
@@ -269,11 +270,16 @@ struct HomeView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
                         agentChip(key: "jarvis", name: "Jarvis", active: (a.active ?? "jarvis") == "jarvis", available: true)
-                        ForEach(list) { ag in agentChip(key: ag.key, name: ag.name ?? ag.key.capitalized, active: ag.active == true, available: ag.available != false) }
+                        ForEach(Self.displayAgents(list)) { ag in agentChip(key: ag.key, name: ag.name ?? ag.key.capitalized, active: ag.active == true, available: ag.available != false) }
                     }
                 }
             }
         }
+    }
+    /// Display only: the Jarvis chip is always drawn first, so the server's own "jarvis" entry (and any repeated key) is not drawn again.
+    static func displayAgents(_ list: [AgentsStatus.Agent]) -> [AgentsStatus.Agent] {
+        var seen: Set<String> = ["jarvis"]
+        return list.filter { seen.insert($0.key.lowercased()).inserted }
     }
     private func agentChip(key: String, name: String, active: Bool, available: Bool) -> some View {
         Button { deck.selectAgent(key) } label: {
