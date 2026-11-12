@@ -13,12 +13,15 @@ struct HomeView: View {
     @EnvironmentObject var uploads: UploadModel
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var alerts: PermissionAlerts
+    @EnvironmentObject var portals: PortalModel
+    @EnvironmentObject var briefing: BriefingModel
+    @Environment(\.calmFX) private var calm
     @StateObject private var picker = UploadController()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.currentTab) private var currentTab
     @State private var sheet: MoreSheet?
 
-    enum MoreSheet: Identifiable { case media, schedules, activity, sessions, settings, addresses; var id: Int { hashValue } }
+    enum MoreSheet: Identifiable { case activity, sessions, addresses; var id: Int { hashValue } }
 
     private var persona: Persona { Persona.of(deck.agents?.active) }
     private var orbActive: Bool { scenePhase == .active && currentTab == .home }
@@ -31,9 +34,9 @@ struct HomeView: View {
                     VStack(spacing: 16) {
                         header
                         orb
+                        BriefingBanner()
                         noticeBanner
                         approvals
-                        quickActions
                         agentPicker
                         runningWork
                         recordingsRow
@@ -43,17 +46,18 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 16)
                 }
+                // the live work view and the debrief cards form out of the core, above the call controls
+                ExecLayerView(toCore: CGSize(width: 0, height: -300)).allowsHitTesting(true)
+                DebriefLayerView()
+                PortalStage(picker: picker, bottomInset: 0)
             }
             .navigationBarHidden(true)
             .safeAreaInset(edge: .bottom) { callBar }
         }
         .sheet(item: $sheet) { s in
             switch s {
-            case .media: NavigationStack { MediaView(picker: picker) }
-            case .schedules: NavigationStack { SchedulesView() }
             case .activity: NavigationStack { ActivityView() }
             case .sessions: NavigationStack { SessionsView() }
-            case .settings: NavigationStack { SettingsView() }
             case .addresses: NavigationStack { ServerAddressesView() }
             }
         }
@@ -76,11 +80,18 @@ struct HomeView: View {
             Spacer()
             Menu {
                 Button { sheet = .activity } label: { Label("Activity and tasks", systemImage: "list.bullet.rectangle") }
-                Button { sheet = .media } label: { Label("Media library", systemImage: "photo.on.rectangle") }
-                Button { sheet = .schedules } label: { Label("Schedules", systemImage: "calendar.badge.clock") }
                 Button { sheet = .sessions } label: { Label("Sessions", systemImage: "clock.arrow.circlepath") }
                 Divider()
-                Button { sheet = .settings } label: { Label("Settings", systemImage: "gearshape") }
+                Button { picker.chooseFile() } label: { Label("Upload a file", systemImage: "arrow.up.doc.fill") }
+                Button { picker.choosePhoto() } label: { Label("Upload a photo", systemImage: "photo.fill") }
+                Button { picker.takePhoto() } label: { Label("Take a photo", systemImage: "camera.fill") }
+                Divider()
+                Menu {
+                    ForEach(PortalLayout.modes, id: \.self) { m in Button(m.replacingOccurrences(of: "_", with: " ").capitalized) { portals.arrange(m) } }
+                } label: { Label("Arrange portals", systemImage: "square.grid.2x2") }
+                Button(role: .destructive) { portals.closeAll() } label: { Label("Close all portals", systemImage: "xmark.circle") }
+                Divider()
+                Button { portals.open(.settings) } label: { Label("Settings", systemImage: "gearshape") }
             } label: {
                 Image(systemName: "ellipsis.circle").font(.title2).foregroundColor(Theme.text).frame(width: 44, height: 44)
             }
@@ -97,9 +108,31 @@ struct HomeView: View {
         return call.voiceState
     }
 
+    private var dockItems: [DockItem] {
+        [DockItem(id: "chat", title: "Chat", symbol: PortalKind.chat.symbol, badge: deck.attention) { portals.open(.chat) },
+         DockItem(id: "term", title: "Terminal", symbol: PortalKind.terminal.symbol, badge: deck.terminals.count) { portals.open(.terminal) },
+         DockItem(id: "newterm", title: "New terminal", symbol: "plus.rectangle.on.rectangle") { deck.openTerminal(); portals.open(.terminal) },
+         DockItem(id: "cams", title: "Cameras", symbol: PortalKind.cameras.symbol) { portals.open(.cameras) },
+         DockItem(id: "files", title: "Files", symbol: PortalKind.files.symbol, badge: deck.unseenFiles) { portals.open(.files) },
+         DockItem(id: "media", title: "Media", symbol: PortalKind.media.symbol) { portals.open(.media) },
+         DockItem(id: "sched", title: "Schedules", symbol: PortalKind.schedule.symbol) { portals.open(.schedule) },
+         DockItem(id: "set", title: "Settings", symbol: PortalKind.settings.symbol) { portals.open(.settings) }]
+    }
+
     private var orb: some View {
         VStack(spacing: 6) {
-            NeuralCoreView(state: orbState, muted: call.muted, persona: persona, active: orbActive,
+            GeometryReader { g in
+                ZStack {
+                    orbCore.frame(height: 300)
+                    CoreDock(items: dockItems, size: g.size)
+                }.frame(width: g.size.width, height: g.size.height)
+            }.frame(height: 330)
+            orbCaption
+        }
+    }
+
+    private var orbCore: some View {
+        NeuralCoreView(state: orbState, muted: call.muted, persona: persona, active: orbActive,
                            micLevel: { call.micLevel }, outLevel: { call.outLevel })
                 .frame(height: 300)
                 .opacity(call.muted ? 0.4 : 1)                       // muted: the orb dims
@@ -118,6 +151,10 @@ struct HomeView: View {
                     if app.display.canRetry { app.retryConnection() }
                     else if call.isActive { call.toggleMute() } else if !call.wantsCall { call.startCall() }
                 }
+    }
+
+    private var orbCaption: some View {
+        VStack(spacing: 6) {
             Text(statusLine).font(.system(size: 13, weight: .semibold, design: .monospaced)).tracking(2)
                 .foregroundColor(Theme.accentLight(persona)).textCase(.uppercase)
                 .accessibilityLabel("Status: \(statusLine)")
@@ -245,30 +282,6 @@ struct HomeView: View {
                 .overlay(Capsule().stroke(Theme.persona(key).opacity(active ? 0.9 : 0.3)))
                 .foregroundColor(available ? Theme.text : Theme.dimText)
         }.disabled(!available).accessibilityAddTraits(active ? .isSelected : [])
-    }
-
-    // MARK: quick actions
-
-    private var quickActions: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-            action("New terminal", "terminal.fill") { deck.openTerminal(); goTo(.terminal) }
-            action("Cameras", "video.fill") { goTo(.cameras) }
-            action("Files", "folder.fill") { goTo(.files) }
-            action("Upload file", "arrow.up.doc.fill") { picker.chooseFile() }
-            action("Upload photo", "photo.fill") { picker.choosePhoto() }
-            action("Take photo", "camera.fill") { picker.takePhoto() }
-            action("Media", "photo.on.rectangle.angled") { sheet = .media }
-            action("Schedules", "calendar.badge.clock") { sheet = .schedules }
-            action("Chat", "bubble.left.fill") { goTo(.chat) }
-        }
-    }
-    private func action(_ title: String, _ icon: String, _ run: @escaping () -> Void) -> some View {
-        Button(action: run) {
-            VStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 22)).foregroundColor(Theme.accentLight(persona))
-                Text(title).font(.caption).foregroundColor(Theme.text).lineLimit(1).minimumScaleFactor(0.8)
-            }.frame(maxWidth: .infinity, minHeight: 66).glass(Theme.accent(persona))
-        }.buttonStyle(.plain).accessibilityLabel(title)
     }
 
     // MARK: uploads and files

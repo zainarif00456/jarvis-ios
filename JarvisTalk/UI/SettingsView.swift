@@ -56,8 +56,25 @@ struct SettingsView: View {
                 permissionRow("Notifications", notifications, why: "not used yet — alerts for finished tasks come later")
                 Text("Photos you pick from your library are shared with the app only for the items you choose; no library permission is needed.").font(.footnote).foregroundColor(Theme.dimText)
             }
+            Section {
+                Picker("Live work view", selection: $settings.execLevel) {
+                    Text("Full: cards out of the core").tag(ExecLevel.full)
+                    Text("Minimal: one line").tag(ExecLevel.minimal)
+                    Text("Off").tag(ExecLevel.off)
+                }
+                .onChange(of: settings.execLevel) { _ in app.settingsChanged() }
+                Toggle("Let Jarvis see this screen", isOn: $settings.sendScreenState)
+                    .onChange(of: settings.sendScreenState) { _ in app.settingsChanged() }
+            } header: { Text("Live work and screen") } footer: {
+                Text("The live work view shows what Jarvis and the agents are doing as small cards. \"Let Jarvis see this screen\" tells Jarvis which portals are open (the browser does the same). It is what lets agents' debriefs and short briefings appear on this phone and Jarvis understand \"close that\". Off: the phone is only a voice and a chat, and debriefs are not shown here.")
+            }
             Section("Display") {
                 Toggle("Keep the screen awake", isOn: $settings.keepScreenAwake)
+                Picker("Effects", selection: $settings.effects) {
+                    Text("Automatic (calm with Reduce Motion or Low Power Mode)").tag("auto")
+                    Text("Full").tag("full")
+                    Text("Calm: no animated effects").tag("calm")
+                }
             }
             Section {
                 Button("Forget this phone", role: .destructive) { confirmForget = true }
@@ -68,7 +85,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        .toolbar { ToolbarItem(placement: .cancellationAction) { SmartCloseButton() } }
         .sheet(item: $editor) { t in NavigationStack { AddressEditor(target: t, onSwitched: {}) } }
         .confirmationDialog("Forget this phone?", isPresented: $confirmForget, titleVisibility: .visible) {
             Button("Forget", role: .destructive) { app.forgetDevice(); dismiss() }

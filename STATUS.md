@@ -71,6 +71,79 @@ state machine (`muted`), so every trigger ends in `CallModel.setMuted`:
 5. AirPods / wired earbuds: one press of the stem / centre button toggles mute with the phone locked in the pocket. Report if
    nothing happens or if Music starts instead. iOS 17+: also try the AirPods mute gesture.
 
+## Phase 3: holographic UI, live work cards, debriefs, chat parity, navigation: PARTLY DONE (logic tested; ALL SwiftUI unseen)
+
+Everything below that is SwiftUI was written against the browser's CSS/JS and passes `swiftc -parse` only. **No SwiftUI visual from this
+phase has been compiled or seen on a device.** The logic under it (protocol, exec cards, debrief walk, screen control, layouts, chat
+timeline) is unit tested on Linux (core 103 tests, model 51).
+
+**Done**
+* **Holographic look** (`UI/Holo/HoloStyle.swift`): the browser's plate (gradient glass in the persona colour, feathered hairline edge,
+  halo, corner nodes, slow scan sweep on the portal in front, interference lines), cards that FORM out of the core (scale / offset /
+  fade / blur transition) and MELT back, a light beam, typed-in text. Only the front portal animates; Reduce Motion, Low Power Mode or
+  Settings > Display > Effects "Calm" switch every animation off (`calmFX`). Particle counts of the orb are unchanged (it already has tiers).
+* **Holographic deck on Home** (`UI/Holo/PortalDeckView.swift`, `HomeView`): the flat tile grid is gone. A ring of glass buttons floats around the
+  orb (Chat, Terminal, New terminal, Cameras, Files, Media, Schedules, Settings, with badges). Tap = the portal forms; drag by the title
+  bar; pinch to zoom (50-250 %, "xx %" resets); minimise (shelf at the bottom), maximise, and a big close button (44 pt) on every portal.
+  Two or more portals arrange by the browser's layout engine, ported (`PortalLayout`: orbit, grid, focus, side by side, cascade;
+  header menu "Arrange portals", "Close all portals"; Jarvis can arrange them too). Pinned (hand-moved) portals stay put.
+  The portals show the same screens as the bottom bar (Chat, Terminal, Cameras, Files, Media, Schedules, Settings, Activity, a file, a report).
+* **Live work view** (`ExecModel`, `UI/Holo/ExecLayerView.swift`): `exec_start` / `exec_end` become a card above the call controls with who /
+  kind / title / running timer, the result drawn by type: terminal (prompt, command typed out, output, exit code, file icons), file lists and
+  folder trees, a file being read (line numbers) or written, edits as removed / added lines, search hits, web results, media, any JSON as
+  key/value rows. Stays 4-11 s depending on size, touching or pinning keeps it, then melts into the core and leaves a chip; chips bring it
+  back. Levels full / minimal (one ticker line) / off in Settings. Long-press a file tile: open on the laptop, show in folder, browse, terminal
+  (`exec_action`). The same work appears as rows in the Chat timeline.
+* **Debriefs** (`DebriefModel`, `UI/Holo/DebriefLayerView.swift`, `SceneBodyViews.swift`): `screen_cmd report_open` then the voice-clocked `report_focus /
+  report_item / report_diagram / report_flag / report_step / report_overview / report_linger / report_keep / report_close` cues. Each scene is
+  a popup card that forms from the core; the card just told is ghosted (tap to bring back), the one before dissolves; linked scenes are joined
+  by a light line with its label; the owner speaking (`voice_state listening`) keeps everything open; after the walk everything melts back.
+  Scene content: conversation bubbles (exact / paraphrased), person and dossier (picture, facts, history, connection labels), stats, checks
+  as a chain of dials, terminal lines, charts (bar, line, area, donut, scatter, drawn natively), before/after change, drafts, timeline,
+  bullets, table, code references, pictures, diagram as a flow of boxes with focus / flow highlighted. The "short briefing" uses the same
+  path (the server sends it as a report with beats). Cues the phone does not draw (`report_zoom/code/row/build/media/cite/pop/aside/changes`)
+  are acknowledged OK with a plain detail so the briefing carries on.
+* **"Jarvis wants to talk"** (`briefing_request`): banner with Talk now / Later / Dismiss (`briefing_accept` / `briefing_dismiss`).
+* **screen_state: YES, behind a Settings switch (default ON).** Reading the server: `ScreenBoard.target()` returns nothing for a client that never reported
+  a `screen_state`, so every `screen_cmd` fails with "no screen is connected right now" and `Hub.present_report` (which a debrief and a short
+  briefing go through) raises. So without it the phone never gets debriefs. With it Jarvis also resolves "close that" / "what is on my screen"
+  against the phone's real portals, and the phone answers every `screen_cmd` with a `screen_ack` (ok or a plain error, never silence: the server
+  waits 5 s). Cost: Jarvis may now pick the phone as THE screen when it is the one with the call (that is the point). Settings > "Let Jarvis see this
+  screen" off = no `screen_state`, every command is refused with an honest ack, debriefs are not shown on this phone. Sent fields are exactly the
+  ones the server accepts (`extra="forbid"` on the top level; test `testScreenStateWireShape`).
+* **Chat parity** (`Timeline.swift`, `ChatView`): your typed message appears ONCE as your bubble (another screen's echo within 30 s is dropped, `/commands`
+  show as one command card like the browser); replies stream in; **a reply during a call is revealed sentence by sentence as it is spoken
+  (`tts_start display`), the text never runs ahead of the voice** (this is the most likely cause of the "strange echo": the full reply used to
+  appear at once next to the live caption and your own words); tool chips go "→ shell.run ls" to "✓ shell.run · done" / "✗"; execution rows with
+  commands and results (tap to expand). I could not reproduce the exact "echo" you saw without the phone; if it still looks wrong tell me what you
+  typed and what appeared.
+* **Navigation never traps** : every bottom-bar screen has "‹ Jarvis" top left and an edge-swipe from the left edge back to Jarvis; every portal has a big
+  close button; Media, Schedules, Settings, Activity, a file preview use `SmartCloseButton` (closes the portal, or dismisses the sheet); sheets also
+  swipe down.
+
+**Not done / only partly done (said plainly)**
+* **Full long-form briefings and reports are the LAST priority and are only basic:** a report that is not a debrief opens as a scrollable portal with every
+  section drawn like a scene. Not done: the boot-sequence animation, voice-clocked zoom into marked picture spots, code excerpt viewer with real
+  lines, table row lighting / step building, citations rail, pop-out of a section, answers to questions inside a briefing ("aside"), the report
+  list / replay (`report_play`), exporting. Diagrams are a flow of boxes (the server's SVG is not drawn).
+* The pointer ("this" = what the finger rests on, `pointing` in `screen_state`) is not sent; "zoom the picture" works only for file portals;
+  `next / previous` between pictures is refused with a plain message.
+* The phone's orb does not lift or dock when portals open; the deck floats over Home.
+* Not tested: any visual, performance on the 13 Pro Max, the beam / form animation timing, drag and pinch feel, the layout of the ring on a small screen.
+* No test hits the real server for the new messages (the browser-side shapes were taken from the server's pydantic models and the web client).
+
+**Test on the phone (Phase 3):**
+1. Home: the orb has a ring of 8 glass buttons around it, no tile grid. Tap Chat: a portal forms from the orb. Drag it by the title bar, pinch it, minimise (a pill
+   appears at the bottom), maximise, close with the X. Open Cameras and Files too: they arrange. Header menu > Arrange portals changes the layout.
+2. Bottom bar: on Chat, Terminal, Cameras, Files tap "‹ Jarvis" top left, and swipe from the left edge: both go home.
+3. Ask Jarvis (by voice) to look at a folder or read a file, or run a command in chat: a live card forms above the call buttons, types the command, shows the
+   result, melts away, leaves a chip at the top. Settings > Live work view: Minimal / Off.
+4. Ask an agent (Friday) for a debrief ("have Friday look into X and debrief me"): popup cards appear one idea at a time, the told one fades, linked ones are
+   joined by a line; talk over it: it stays. If NOTHING appears, check Settings > "Let Jarvis see this screen" is on and look at the server log for
+   `hub.debrief_not_presented`.
+5. Chat: type "hello": your bubble once, the reply streams in. During a call the reply text appears with his voice, sentence by sentence.
+6. Settings > Display > Effects: Calm turns animations off; low-power mode does the same automatically.
+
 # STATUS (written 2026-11-12, on the Linux laptop; nothing here has run on a Mac or an iPhone yet)
 
 ## In one paragraph

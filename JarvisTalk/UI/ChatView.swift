@@ -59,7 +59,7 @@ struct ChatView: View {
             }
             .navigationTitle("Chat").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { ConnectionPill() }
+                ToolbarItemGroup(placement: .navigationBarLeading) { BackToJarvisButton(); ConnectionPill() }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack {
                         if chat.busy { Button { chat.interrupt() } label: { Image(systemName: "stop.circle.fill") }.accessibilityLabel("Interrupt Jarvis") }
@@ -171,7 +171,11 @@ struct TimelineRow: View {
                 }
                 if !entry.text.isEmpty { markdownText(entry.text).foregroundColor(Theme.text).textSelection(.enabled) }
                 else if entry.streaming { Text("…").foregroundColor(Theme.dimText) }
-                if !entry.tools.isEmpty {
+                if !entry.toolChips.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack { ForEach(entry.toolChips) { c in PillLabel(text: c.label, color: c.state == .ok ? Theme.ok : (c.state == .failed ? Theme.bad : Theme.warn)) } }
+                    }
+                } else if !entry.tools.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) { HStack { ForEach(entry.tools, id: \.self) { PillLabel(text: $0, color: Theme.dimText) } } }
                 }
                 if entry.interrupted { Label(entry.detail.map { "Interrupted — heard: \($0)" } ?? "Interrupted", systemImage: "hand.raised").font(.caption).foregroundColor(Theme.warn) }
@@ -206,6 +210,36 @@ struct TimelineRow: View {
             if let f = entry.file { FileRow(file: f, compact: true) } else { Text(entry.text).font(.caption).foregroundColor(Theme.dimText) }
         case .caption:
             Text(entry.text).italic().foregroundColor(Theme.dimText)
+        case .exec:
+            ExecTimelineRow(entry: entry)
         }
+    }
+}
+
+/// The live work in the chat timeline: who did what, how it went, the result on a tap.
+struct ExecTimelineRow: View {
+    let entry: TimelineEntry
+    @State private var open = false
+    var body: some View {
+        let tint = entry.failed ? Theme.bad : Theme.persona(entry.persona)
+        VStack(alignment: .leading, spacing: 6) {
+            Button { withAnimation(.easeInOut(duration: 0.2)) { open.toggle() } } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: ExecStyle.symbol(entry.execKind ?? "tool")).font(.system(size: 12, weight: .bold)).foregroundColor(tint)
+                        .frame(width: 24, height: 24).background(RoundedRectangle(cornerRadius: 6).fill(tint.opacity(0.16)))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(entry.name) · \(entry.text)").font(.system(size: 12, design: .monospaced)).foregroundColor(Theme.text).lineLimit(2)
+                        if let d = entry.detail, !d.isEmpty { Text(d).font(.system(size: 11)).foregroundColor(Theme.dimText).lineLimit(1) }
+                    }
+                    Spacer(minLength: 4)
+                    if entry.status == "running" { ProgressView().scaleEffect(0.6) }
+                    else if let ms = entry.execMs { Text(ms < 1000 ? "\(ms) ms" : String(format: "%.1f s", Double(ms) / 1000)).font(.system(size: 10, design: .monospaced)).foregroundColor(entry.failed ? Theme.bad : Theme.ok) }
+                    if entry.execResult != nil { Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 10)).foregroundColor(Theme.dimText) }
+                }
+            }.buttonStyle(.plain)
+            if open, let r = entry.execResult { ExecResultView(result: r, tint: tint) }
+        }
+        .padding(8).frame(maxWidth: .infinity, alignment: .leading).glass(tint)
+        .accessibilityElement(children: .contain)
     }
 }
