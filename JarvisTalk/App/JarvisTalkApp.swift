@@ -22,6 +22,7 @@ struct JarvisTalkApp: App {
                 .environmentObject(holder.model.debrief)
                 .environmentObject(holder.model.briefing)
                 .environmentObject(holder.model.screen)
+                .environmentObject(holder.pipControl)
                 .environmentObject(holder.alerts)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent(.jarvis))
@@ -38,6 +39,8 @@ final class AppHolder: ObservableObject {
     let alerts = PermissionAlerts()
     private let nowPlaying = NowPlayingController()
     private let inputMute = InputMuteBridge()
+    let pip = ExecPiP()
+    lazy var pipControl = PiPControl(pip: pip)
     private let network = NetworkMonitor()
     private let permissions = SystemPermissions()
     private var started = false
@@ -70,6 +73,8 @@ final class AppHolder: ObservableObject {
             self.nowPlaying.setActive(on, muted: call.muted)
             self.inputMute.setCall(on)
         }
+        pip.setEnabled(model.settings.liveExecution)
+        model.exec.onSummary = { [weak self] n, t, d in self?.pip.update(running: n, title: t, detail: d) }
         network.onChange = { [weak self] online, changed in self?.model.networkChanged(online: online, interfaceChanged: changed) }
         network.start()
         model.launch()
@@ -80,7 +85,7 @@ final class AppHolder: ObservableObject {
         switch phase {
         case .active: model.sceneBecameActive()
         case .inactive: model.sceneBecameInactive(background: false)
-        case .background: model.sceneBecameInactive(background: true)
+        case .background: model.sceneBecameInactive(background: true); pip.appDidBackground()
         @unknown default: break
         }
         nowPlaying.update(muted: model.call.muted)
@@ -137,4 +142,15 @@ struct MainTabs: View {
 private struct TabKey: EnvironmentKey { static let defaultValue: MainTabs.Tab = .home }
 extension EnvironmentValues {
     var currentTab: MainTabs.Tab { get { self[TabKey.self] } set { self[TabKey.self] = newValue } }
+}
+
+/// Settings access to the picture-in-picture status window.
+@MainActor
+final class PiPControl: ObservableObject {
+    let pip: ExecPiP
+    @Published var active = false
+    init(pip: ExecPiP) { self.pip = pip; pip.onActiveChanged = { [weak self] on in self?.active = on } }
+    var supported: Bool { pip.isSupported }
+    func setEnabled(_ on: Bool) { pip.setEnabled(on) }
+    func toggle() { if pip.isActive { pip.stop() } else { pip.start() } }
 }

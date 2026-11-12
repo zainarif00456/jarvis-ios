@@ -8,6 +8,7 @@ struct SettingsView: View {
     @EnvironmentObject var call: CallModel
     @EnvironmentObject var deck: DeckModel
     @EnvironmentObject var alerts: PermissionAlerts
+    @EnvironmentObject var pip: PiPControl
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var mic: PermissionState = .undetermined
@@ -67,6 +68,16 @@ struct SettingsView: View {
                     .onChange(of: settings.sendScreenState) { _ in app.settingsChanged() }
             } header: { Text("Live work and screen") } footer: {
                 Text("The live work view shows what Jarvis and the agents are doing as small cards. \"Let Jarvis see this screen\" tells Jarvis which portals are open (the browser does the same). It is what lets agents' debriefs and short briefings appear on this phone and Jarvis understand \"close that\". Off: the phone is only a voice and a chat, and debriefs are not shown here.")
+            }
+            Section {
+                Toggle("Floating status window (picture-in-picture)", isOn: $settings.liveExecution)
+                    .disabled(!pip.supported)
+                    .onChange(of: settings.liveExecution) { pip.setEnabled($0) }
+                if settings.liveExecution {
+                    Button(pip.active ? "Close the floating window" : "Show the floating window now") { pip.toggle() }
+                }
+            } header: { Text("Outside the app") } footer: {
+                Text("Shows what Jarvis is doing in a small window you can drag and resize, over other apps. iOS allows no other overlays. It opens by itself when you leave the app while work runs (iOS may refuse; then press the button before leaving). Not tested on a real device.")
             }
             Section("Display") {
                 Toggle("Keep the screen awake", isOn: $settings.keepScreenAwake)

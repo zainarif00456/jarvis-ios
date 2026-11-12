@@ -71,6 +71,19 @@ state machine (`muted`), so every trigger ends in `CallModel.setMuted`:
 5. AirPods / wired earbuds: one press of the stem / centre button toggles mute with the phone locked in the pocket. Report if
    nothing happens or if Music starts instead. iOS 17+: also try the AirPods mute gesture.
 
+## Phase 4: execution status outside the app: PARTLY DONE (Picture-in-Picture written, UNVERIFIED)
+
+Picked **Picture-in-Picture**, not a Live Activity: a Live Activity needs a widget-extension target with its own App ID / profile and an App Group;
+a free Apple ID is tightly limited there and I cannot test either here. PiP lives in the app target and needs no extra entitlement
+(`Platform/ExecPiP.swift`: `AVPictureInPictureController` with a sample-buffer layer, status frames drawn with UIKit 4x a second: running count,
+latest card title, last result line, timer; the system lets you drag and resize it). Settings > "Outside the app" switch (default off) + a
+"Show the floating window now" button; it also tries to start by itself when the app goes to the background while work runs.
+**Not verified:** compiled never; whether iOS accepts the automatic start from a background-audio app, whether the first frame shows, resize behaviour.
+iOS cannot draw arbitrary overlays over other apps; that is why nothing else is offered. Live Activity: not done.
+
+**Test on the phone (Phase 4):** Settings > Outside the app > on > "Show the floating window now": a small window with "JARVIS · IDLE" floats; leave the app,
+ask Jarvis to run a command: the window shows the title and result. Report if nothing appears (then the sample-buffer setup needs a look).
+
 ## Phase 3: holographic UI, live work cards, debriefs, chat parity, navigation: PARTLY DONE (logic tested; ALL SwiftUI unseen)
 
 Everything below that is SwiftUI was written against the browser's CSS/JS and passes `swiftc -parse` only. **No SwiftUI visual from this
