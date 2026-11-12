@@ -8,7 +8,7 @@ public enum ServerMessage: Equatable, Sendable {
     case turnStarted(turnId: String, kind: String?, agent: String?, voice: Bool)
     case textDelta(turnId: String, text: String)
     case toolStarted(turnId: String, callId: String?, name: String, args: JSONValue?)
-    case toolFinished(turnId: String, callId: String?, status: String?)
+    case toolFinished(turnId: String, callId: String?, name: String?, ok: Bool, status: String?)
     case turnDone(TurnDone)
     case turnFailed(turnId: String?, message: String)
     case turnInterrupted(turnId: String?)
@@ -26,6 +26,12 @@ public enum ServerMessage: Equatable, Sendable {
     case voiceStop
     case voiceError(text: String, recoverable: Bool)
     case ttsStart(turnId: String?, text: String?, display: String?, speaker: String?)
+    case ttsEnd(turnId: String?)
+    case execStart(ExecStart)
+    case execEnd(ExecEnd)
+    case screenCmd(ScreenCommand)
+    case briefingRequest([BriefingRun])
+    case briefingCleared(ids: [String])
     case announcement(text: String)
     case userMessage(text: String, device: String?)
     case commandResult(line: String, ok: Bool, text: String)
@@ -113,7 +119,7 @@ public enum ServerMessageDecoder {
             return .toolStarted(turnId: id, callId: str("call_id"), name: str("name") ?? "tool", args: root["args"])
         case "tool_finished":
             guard let id = str("turn_id") else { return .malformed(type: type) }
-            return .toolFinished(turnId: id, callId: str("call_id"), status: str("status"))
+            return .toolFinished(turnId: id, callId: str("call_id"), name: str("name"), ok: root["ok"]?.bool ?? (str("status") == "done"), status: str("status"))
         case "turn_done":
             guard let id = str("turn_id") else { return .malformed(type: type) }
             return .turnDone(.init(turnId: id, text: str("text") ?? "", model: str("model"), costUsd: root["cost_usd"]?.double,
@@ -142,6 +148,24 @@ public enum ServerMessageDecoder {
         case "voice_stop": return .voiceStop
         case "voice_error": return .voiceError(text: str("text") ?? "Voice error.", recoverable: root["recoverable"]?.bool ?? false)
         case "tts_start": return .ttsStart(turnId: str("turn_id"), text: str("text"), display: str("display"), speaker: str("speaker"))
+        case "tts_end": return .ttsEnd(turnId: str("turn_id"))
+        case "exec_start":
+            guard let id = str("id") else { return .malformed(type: type) }
+            let kind = str("kind") ?? "tool"
+            return .execStart(ExecStart(id: id, who: str("who") ?? "jarvis", kind: kind, title: str("title") ?? kind, parent: str("parent"), wide: root["detail"]?["wide"]?.bool ?? false))
+        case "exec_end":
+            guard let id = str("id") else { return .malformed(type: type) }
+            return .execEnd(ExecEnd(id: id, ok: root["ok"]?.bool ?? true, ms: root["ms"]?.int, result: ExecResult.parse(root["result"])))
+        case "screen_cmd":
+            guard let cmd = str("cmd_id"), let action = str("action") else { return .malformed(type: type) }
+            return .screenCmd(ScreenCommand(cmdId: cmd, action: action, target: str("target"), args: root["args"] ?? .object([:])))
+        case "briefing_request":
+            let runs = (root["runs"]?.array ?? []).compactMap { r -> BriefingRun? in
+                guard let id = r["id"]?.string else { return nil }
+                return BriefingRun(id: id, title: r["title"]?.string ?? "A briefing", priority: r["priority"]?.string ?? "normal", preview: r["preview"]?.string ?? "", failed: r["failed"]?.bool ?? false)
+            }
+            return .briefingRequest(runs)
+        case "briefing_cleared": return .briefingCleared(ids: root["ids"]?.array?.compactMap { $0.string } ?? [])
         case "announcement": return .announcement(text: str("text") ?? "")
         case "user_message": return .userMessage(text: str("text") ?? "", device: str("device"))
         case "command_result": return .commandResult(line: str("line") ?? "", ok: root["ok"]?.bool ?? true, text: str("text") ?? "")
@@ -196,6 +220,11 @@ public enum ClientMessage: Equatable, Sendable {
     case terminalOpen(cwd: String?)
     case terminalClose(id: String)
     case voicePlayback(event: String, underruns: Int, gapMs: Int)
+    case screenState(ScreenSnapshot)
+    case screenAck(cmdId: String, ok: Bool, error: String, detail: String, state: ScreenSnapshot?)
+    case execAction(handle: String, action: String, req: String?)
+    case briefingAccept(textOnly: Bool)
+    case briefingDismiss(ids: [String])
 
     public func json() -> String {
         var o: [String: JSONValue]
@@ -220,6 +249,17 @@ public enum ClientMessage: Equatable, Sendable {
         case .terminalClose(let id): o = ["type": .string("terminal_close"), "id": .string(id)]
         case .voicePlayback(let e, let u, let g):
             o = ["type": .string("voice_playback"), "event": .string(e), "underruns": .number(Double(max(0, u))), "gap_ms": .number(Double(max(0, g)))]
+        case .screenState(let snap):
+            o = snap.bodyFields; o["type"] = .string("screen_state")
+        case .screenAck(let id, let ok, let err, let detail, let state):
+            o = ["type": .string("screen_ack"), "cmd_id": .string(String(id.prefix(64))), "ok": .bool(ok),
+                 "error": .string(String(err.prefix(500))), "detail": .string(String(detail.prefix(300)))]
+            if let st = state { o["state"] = .object(st.bodyFields) }
+        case .execAction(let h, let a, let req):
+            o = ["type": .string("exec_action"), "handle": .string(h), "action": .string(a)]
+            if let r = req { o["req"] = .string(String(r.prefix(40))) }
+        case .briefingAccept(let t): o = ["type": .string("briefing_accept"), "text_only": .bool(t)]
+        case .briefingDismiss(let ids): o = ["type": .string("briefing_dismiss"), "ids": .array(ids.prefix(50).map { .string($0) })]
         }
         return JSONValue.object(o).serialized()
     }

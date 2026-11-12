@@ -3,7 +3,7 @@ import Foundation
 /// One row of the chat / activity timeline.
 public struct TimelineEntry: Identifiable, Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
-        case user, assistant, agent, command, task, approval, note, session, file, caption
+        case user, assistant, agent, command, task, approval, note, session, file, caption, exec
     }
     public var id: String
     public var kind: Kind
@@ -22,9 +22,25 @@ public struct TimelineEntry: Identifiable, Equatable, Sendable {
     public var status: String?
     public var taskId: String?
     public var file: FileInfo?
+    /// Live tool chips of a streaming turn (`tool_started` / `tool_finished`): "→ shell.run ls" then "✓ shell.run · done".
+    public var toolChips: [ToolChip] = []
+    /// Voice turns: the full reply, while `text` only shows the sentences already spoken (the text never runs ahead of the voice).
+    public var fullText: String = ""
+    public var revealing = false
+    /// Execution rows (kind `.exec`): the live work view's card as a row in the timeline.
+    public var execKind: String?
+    public var execResult: ExecResult?
+    public var execMs: Int?
     public init(id: String, kind: Kind, name: String = "", persona: String = "jarvis", text: String = "", ts: Date? = nil, turn: String? = nil) {
         self.id = id; self.kind = kind; self.name = name; self.persona = persona; self.text = text; self.ts = ts; self.turn = turn
     }
+}
+
+public struct ToolChip: Equatable, Sendable, Identifiable {
+    public var id: String
+    public var label: String
+    public var state: State
+    public enum State: Equatable, Sendable { case running, ok, failed }
 }
 
 /// Folds history rows and live server messages into the timeline. Pure: the view model owns one of these.
@@ -120,19 +136,66 @@ public struct TimelineReducer: Sendable {
             if kind == "greeting" { e.status = "greeting" }
             entries.append(e)
         case .textDelta(let turn, let text):
-            update(turn: turn) { $0.text += text }
-        case .toolStarted(let turn, _, let name, _):
-            update(turn: turn) { if !$0.tools.contains(name) { $0.tools.append(name) } }
-        case .toolFinished: break
+            update(turn: turn) {
+                $0.fullText += text
+                if !$0.fromVoice { $0.text = $0.fullText }      // typed chat streams in; a call reveals sentence by sentence
+            }
+        case .ttsStart(let turn, _, let display, _):
+            guard let turn = turn, let display = display, !display.isEmpty else { break }
+            update(turn: turn) {
+                guard $0.fromVoice, $0.streaming || $0.revealing else { return }
+                $0.revealing = true
+                $0.text += ($0.text.isEmpty ? "" : " ") + display
+            }
+        case .ttsEnd(let turn):
+            for i in entries.indices where entries[i].revealing && (turn == nil || entries[i].turn == turn) && !entries[i].streaming && !entries[i].interrupted {
+                entries[i].revealing = false; if !entries[i].fullText.isEmpty { entries[i].text = entries[i].fullText }
+            }
+        case .voiceState(let st):
+            // the voice went quiet: whatever was spoken is all there is to show, the rest of a finished reply is shown whole
+            if st == "listening" || st == "idle" {
+                for i in entries.indices where entries[i].revealing && !entries[i].streaming && !entries[i].interrupted {
+                    entries[i].revealing = false; if !entries[i].fullText.isEmpty { entries[i].text = entries[i].fullText }
+                }
+            }
+        case .toolStarted(let turn, let call, let name, let args):
+            update(turn: turn) {
+                if !$0.tools.contains(name) { $0.tools.append(name) }
+                let id = call ?? "\(name)-\($0.toolChips.count)"
+                $0.toolChips.append(ToolChip(id: id, label: "→ \(name.replacingOccurrences(of: "_", with: ".")) \(Self.briefArgs(args))".trimmingCharacters(in: .whitespaces), state: .running))
+            }
+        case .toolFinished(let turn, let call, let name, let ok, let status):
+            update(turn: turn) {
+                let st = (status ?? "done")
+                let waiting = ["running", "awaiting_approval", "already_running"].contains(st)
+                if let i = $0.toolChips.firstIndex(where: { $0.id == call }) {
+                    $0.toolChips[i].state = waiting ? .running : (ok ? .ok : .failed)
+                    $0.toolChips[i].label = "\(ok ? "✓" : "✗") \((name ?? "tool").replacingOccurrences(of: "_", with: ".")) · \(st.replacingOccurrences(of: "_", with: " "))"
+                }
+            }
+        case .execStart(let e):
+            guard !entries.contains(where: { $0.id == "exec-\(e.id)" }) else { break }
+            var row = TimelineEntry(id: "exec-\(e.id)", kind: .exec, name: e.who == "owner" ? "You" : e.who.capitalized, persona: e.who, text: e.title, ts: now)
+            row.execKind = e.kind; row.status = "running"
+            entries.append(row)
+        case .execEnd(let e):
+            if let i = entries.lastIndex(where: { $0.id == "exec-\(e.id)" }) {
+                entries[i].status = e.ok ? "ok" : "failed"; entries[i].execResult = e.result; entries[i].execMs = e.ms; entries[i].failed = !e.ok
+                entries[i].detail = e.result.summary
+            }
         case .turnDone(let d):
             busy = false
+            if let i = indexOf(turn: d.turnId), entries[i].fromVoice, entries[i].revealing { entries[i].fullText = d.text.isEmpty ? entries[i].fullText : d.text; entries[i].streaming = false
+                if !d.toolsUsed.isEmpty { entries[i].tools = d.toolsUsed }
+                break }
+            if let i = indexOf(turn: d.turnId) { entries[i].fullText = d.text }
             if indexOf(turn: d.turnId) == nil {
                 var e = TimelineEntry(id: "turn-\(d.turnId)", kind: .assistant, name: "Jarvis", ts: now, turn: d.turnId)
                 e.text = d.text
                 entries.append(e)
             }
             update(turn: d.turnId) {
-                if !d.text.isEmpty { $0.text = d.text }
+                if !d.text.isEmpty { $0.text = d.text; $0.fullText = d.text }
                 $0.streaming = false
                 if !d.toolsUsed.isEmpty { $0.tools = d.toolsUsed }
             }
@@ -151,7 +214,7 @@ public struct TimelineReducer: Sendable {
         case .modelSwitched(let model, let reason):
             note("Jarvis escalated to \(model.replacingOccurrences(of: "claude-", with: "")): \(reason ?? "")", now: now)
         case .userMessage(let text, _):
-            addUser(text, now: now, fromVoice: false)
+            addUser(text, now: now, fromVoice: false, window: 30)    // another screen's message; our own typed one is already there
         case .announcement(let text):
             var e = TimelineEntry(id: nextLocalId("ann"), kind: .assistant, name: "Jarvis", text: text, ts: now)
             e.fromVoice = true
@@ -199,9 +262,9 @@ public struct TimelineReducer: Sendable {
     /// Adds the owner's own typed message at once (the server does not echo it back to the sender).
     public mutating func addLocalUser(_ text: String, now: Date = Date()) { addUser(text, now: now, fromVoice: false, force: true) }
 
-    private mutating func addUser(_ text: String, now: Date, fromVoice: Bool, force: Bool = false) {
+    private mutating func addUser(_ text: String, now: Date, fromVoice: Bool, force: Bool = false, window: TimeInterval = 6) {
         // the same words arriving twice (spoken, then echoed as a message) count once
-        if !force, let last = lastUserText, last.text == text, now.timeIntervalSince(last.at) < 6 {
+        if !force, let last = lastUserText, last.text == text, now.timeIntervalSince(last.at) < window {
             if fromVoice, let i = entries.lastIndex(where: { $0.kind == .user && $0.text == text }) { entries[i].fromVoice = true }
             return
         }
@@ -215,6 +278,11 @@ public struct TimelineReducer: Sendable {
         var e = TimelineEntry(id: nextLocalId("note"), kind: .note, text: text, ts: now)
         e.failed = failed
         entries.append(e)
+    }
+
+    static func briefArgs(_ a: JSONValue?) -> String {
+        for k in ["command", "path", "pattern", "task", "query"] { if let v = a?[k]?.string, !v.isEmpty { return String(v.prefix(70)) } }
+        return ""
     }
 
     private func indexOf(turn: String) -> Int? { entries.lastIndex(where: { $0.turn == turn && $0.kind == .assistant }) }

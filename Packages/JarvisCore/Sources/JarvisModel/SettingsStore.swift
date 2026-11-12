@@ -33,6 +33,7 @@ public enum ServerListError: Error, Equatable, LocalizedError {
 @MainActor
 public final class SettingsStore: ObservableObject {
     enum Key {
+        static let execLevel = "execLevel", screenState = "sendScreenState", effects = "effects", live = "liveExecution"
         static let endpoint = "endpoint", deviceName = "deviceName", autoStart = "autoStartCall", keepAwake = "keepAwake", haptics = "haptics"
         static let legacyToken = "device-token", servers = "servers", activeServer = "activeServer"
         static func token(_ id: String) -> String { "device-token." + id }
@@ -47,6 +48,14 @@ public final class SettingsStore: ObservableObject {
     @Published public var autoStartCall: Bool { didSet { defaults.set(autoStartCall, for: Key.autoStart) } }
     @Published public var keepScreenAwake: Bool { didSet { defaults.set(keepScreenAwake, for: Key.keepAwake) } }
     @Published public var haptics: Bool { didSet { defaults.set(haptics, for: Key.haptics) } }
+    /// Live work view: full (cards out of the core), minimal (one ticker line), off. Like the browser's rail button.
+    @Published public var execLevel: ExecLevel { didSet { defaults.set(execLevel.rawValue, for: Key.execLevel) } }
+    /// Tell Jarvis what this screen shows (`screen_state`), so debriefs and short briefings are delivered to the phone.
+    @Published public var sendScreenState: Bool { didSet { defaults.set(sendScreenState, for: Key.screenState) } }
+    /// Visual effects: "auto" (follows Reduce Motion / Low Power Mode), "full" or "calm".
+    @Published public var effects: String { didSet { defaults.set(effects, for: Key.effects) } }
+    /// Show live execution status outside the app (Live Activity / picture-in-picture), when available.
+    @Published public var liveExecution: Bool { didSet { defaults.set(liveExecution, for: Key.live) } }
 
     public init(defaults: SimpleDefaults, secrets: SecretStore, defaultDeviceName: String = "iPhone") {
         self.defaults = defaults; self.secrets = secrets
@@ -54,6 +63,10 @@ public final class SettingsStore: ObservableObject {
         autoStartCall = defaults.bool(Key.autoStart) ?? true
         keepScreenAwake = defaults.bool(Key.keepAwake) ?? false
         haptics = defaults.bool(Key.haptics) ?? true
+        execLevel = defaults.string(Key.execLevel).flatMap(ExecLevel.init(rawValue:)) ?? .full
+        sendScreenState = defaults.bool(Key.screenState) ?? true
+        effects = defaults.string(Key.effects) ?? "auto"
+        liveExecution = defaults.bool(Key.live) ?? false
         if let json = defaults.string(Key.servers), let list = try? JSONDecoder().decode([SavedServer].self, from: Data(json.utf8)) { servers = list }
         activeID = defaults.string(Key.activeServer)
         migrateLegacy()

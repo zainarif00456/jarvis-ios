@@ -30,6 +30,11 @@ public final class AppModel: ObservableObject {
     public let chat = ChatModel()
     public let deck = DeckModel()
     public let uploads = UploadModel()
+    public let exec = ExecModel()
+    public let portals = PortalModel()
+    public let debrief = DebriefModel()
+    public let briefing = BriefingModel()
+    public let screen: ScreenModel
     public let platform: Platform
 
     /// How long a liveness check after the app comes back from the background waits for the server's answer.
@@ -48,6 +53,7 @@ public final class AppModel: ObservableObject {
         self.platform = platform
         settings = SettingsStore(defaults: platform.defaults, secrets: platform.secrets)
         call = CallModel(audio: platform.makeAudio(), permissions: platform.permissions)
+        screen = ScreenModel(portals: portals, debrief: debrief)
         wire()
     }
 
@@ -57,11 +63,27 @@ public final class AppModel: ObservableObject {
         call.sendMessage = { [weak self] m in _ = self?.send(m) }
         call.onChange = { [weak self] in self?.refreshDisplay() }
         call.sendAudioFrame = { [weak self] d in _ = await self?.session?.sendAudio(d) }
+        screen.send = { [weak self] m in self?.send(m) ?? false }
+        exec.sendMessage = send; briefing.sendMessage = send
+        exec.level = settings.execLevel
+        screen.enabled = settings.sendScreenState
+        debrief.loader = { [weak self] id in
+            guard let api = self?.api else { throw ApiError.offline("not connected") }
+            let raw: JSONValue = try await api.get("/api/reports/\(id)")
+            guard let r = Report.parse(raw) else { throw DebriefModel.DebriefError.noReport }
+            return r
+        }
         let provider: () -> ApiClient? = { [weak self] in self?.api }
         chat.apiProvider = provider; deck.apiProvider = provider; uploads.apiProvider = provider
         uploads.onUploaded = { [weak self] item, _ in
             if item.destination == .files { Task { await self?.deck.loadFiles(kind: "upload") } } else { Task { await self?.deck.loadMedia() } }
         }
+    }
+
+    /// Settings that other models act on (live work level, screen control): call after the owner changes them.
+    public func settingsChanged() {
+        exec.level = settings.execLevel
+        screen.enabled = settings.sendScreenState
     }
 
     // MARK: start
@@ -314,10 +336,20 @@ public final class AppModel: ObservableObject {
             chat.setHistory(w.history)
             call.socketWelcomed()
             send(.presence(visible: isForeground))
+            briefing.reset()
+            screen.report(now: true)       // a fresh connection: tell Jarvis what this screen shows
             Task { await deck.loadMedia(); await deck.loadSessions() }
-        case .callStarted, .callEnded, .voiceState, .voicePartial, .voiceStop, .voiceError:
+        case .callStarted, .callEnded, .voicePartial, .voiceStop, .voiceError:
             call.receive(m); chat.apply(m)
         case .voiceFinal: call.receive(m); chat.apply(m)
+        case .execStart(let e): exec.start(e); chat.apply(m)
+        case .execEnd(let e): exec.end(e); chat.apply(m)
+        case .screenCmd(let c): Task { await screen.handle(c) }
+        case .briefingRequest(let runs): briefing.set(runs)
+        case .briefingCleared(let ids): briefing.clear(ids)
+        case .voiceState(let st):
+            if st == "listening" { debrief.keepAll() }      // the owner is talking: nothing closes under them
+            call.receive(m); chat.apply(m)
         case .unknown, .malformed, .pong: break
         default:
             deck.apply(m); chat.apply(m)
