@@ -84,10 +84,12 @@ public struct Platform {
     public var makeAudio: () -> VoiceAudio
     public var transport: WebSocketTransportProvider
     public var appVersion: String
+    public var screenshots: ScreenshotSource
     public init(secrets: SecretStore, defaults: SimpleDefaults, permissions: PermissionProvider, makeAudio: @escaping () -> VoiceAudio,
-                transport: WebSocketTransportProvider = WebSocketTransportProvider(), appVersion: String = "1.0") {
+                transport: WebSocketTransportProvider = WebSocketTransportProvider(), appVersion: String = "1.0",
+                screenshots: ScreenshotSource = NoScreenshotSource()) {
         self.secrets = secrets; self.defaults = defaults; self.permissions = permissions; self.makeAudio = makeAudio
-        self.transport = transport; self.appVersion = appVersion
+        self.transport = transport; self.appVersion = appVersion; self.screenshots = screenshots
     }
 }
 

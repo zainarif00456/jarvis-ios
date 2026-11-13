@@ -9,6 +9,7 @@ struct SettingsView: View {
     @EnvironmentObject var deck: DeckModel
     @EnvironmentObject var alerts: PermissionAlerts
     @EnvironmentObject var pip: PiPControl
+    @EnvironmentObject var shots: ScreenshotSyncModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var mic: PermissionState = .undetermined
@@ -79,6 +80,13 @@ struct SettingsView: View {
             } header: { Text("Outside the app") } footer: {
                 Text("Shows what Jarvis is doing in a small window you can drag and resize, over other apps. iOS allows no other overlays. It opens by itself when you leave the app while work runs (iOS may refuse; then press the button before leaving). Not tested on a real device.")
             }
+            Section {
+                Toggle("Send screenshots to Jarvis", isOn: Binding(get: { shots.enabled }, set: { shots.setEnabled($0) }))
+                Text(shots.statusLine).font(.footnote).foregroundColor(Theme.dimText)
+                if shots.needsSettings { Button("Open Photos settings") { openSettings() } }
+            } header: { Text("Screenshots") } footer: {
+                Text("Every new screenshot (for example from a triple-tap on the back of the phone) is sent to your Jarvis media library by itself. Needs Photos access. Screenshots taken while this is off are never sent. While the app is closed they are sent the next time you open it.")
+            }
             Section("Display") {
                 Toggle("Keep the screen awake", isOn: $settings.keepScreenAwake)
                 Picker("Effects", selection: $settings.effects) {
@@ -101,7 +109,7 @@ struct SettingsView: View {
         .confirmationDialog("Forget this phone?", isPresented: $confirmForget, titleVisibility: .visible) {
             Button("Forget", role: .destructive) { app.forgetDevice(); dismiss() }
         } message: { Text("The call ends and you will need a new pairing code.") }
-        .task { await refresh(); await deck.loadVoices(); speed = deck.voices?.speed ?? 1.15 }
+        .task { await shots.refresh(); await refresh(); await deck.loadVoices(); speed = deck.voices?.speed ?? 1.15 }
         .onChange(of: scenePhase) { p in if p == .active { Task { await refresh() } } }
     }
 

@@ -16,6 +16,7 @@ struct JarvisTalkApp: App {
                 .environmentObject(holder.model.chat)
                 .environmentObject(holder.model.deck)
                 .environmentObject(holder.model.uploads)
+                .environmentObject(holder.model.screenshots)
                 .environmentObject(holder.model.settings)
                 .environmentObject(holder.model.exec)
                 .environmentObject(holder.model.portals)
@@ -50,7 +51,8 @@ final class AppHolder: ObservableObject {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let permissions = self.permissions
         model = AppModel(platform: Platform(secrets: KeychainStore(), defaults: UserDefaultsStore(), permissions: permissions,
-                                            makeAudio: { VoiceAudioEngine() }, appVersion: version))
+                                            makeAudio: { VoiceAudioEngine() }, appVersion: version,
+                                            screenshots: PhotoScreenshotSource()))
         alerts.permissions = permissions
     }
 
@@ -73,6 +75,16 @@ final class AppHolder: ObservableObject {
             self.nowPlaying.setActive(on, muted: call.muted)
             self.inputMute.setCall(on)
         }
+        // a screenshot upload that starts while the app is backgrounded (during a call) gets time to finish
+        model.screenshots.runProtected = { work in
+            let app = UIApplication.shared
+            let token = BackgroundTaskToken()
+            token.id = app.beginBackgroundTask(withName: "screenshot-upload") { token.end() }
+            Task { @MainActor in
+                await work()
+                token.end()
+            }
+        }
         pip.setEnabled(model.settings.liveExecution)
         model.exec.onSummary = { [weak self] n, t, d in self?.pip.update(running: n, title: t, detail: d) }
         network.onChange = { [weak self] online, changed in self?.model.networkChanged(online: online, interfaceChanged: changed) }
@@ -92,10 +104,22 @@ final class AppHolder: ObservableObject {
     }
 }
 
+/// Holds one UIKit background-task id so the expiration handler and the finished work end it exactly once.
+final class BackgroundTaskToken: @unchecked Sendable {
+    var id = UIBackgroundTaskIdentifier.invalid
+    func end() {
+        guard id != .invalid else { return }
+        let finished = id
+        id = .invalid
+        UIApplication.shared.endBackgroundTask(finished)
+    }
+}
+
 struct RootView: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var alerts: PermissionAlerts
+    @EnvironmentObject var shots: ScreenshotSyncModel
 
     var body: some View {
         FXScope {
@@ -107,6 +131,22 @@ struct RootView: View {
             }
         }
         .permissionAlert(alerts)
+        .overlay(alignment: .top) {
+            if let text = shots.banner {
+                Label(text, systemImage: "checkmark.circle.fill")
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(Color.black.opacity(0.85)))
+                    .foregroundColor(.white)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: shots.banner)
+        .onChange(of: shots.ledger.totalUploaded) { _ in
+            if settings.haptics { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        }
         .onChange(of: settings.keepScreenAwake) { on in UIApplication.shared.isIdleTimerDisabled = on }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = settings.keepScreenAwake }
     }

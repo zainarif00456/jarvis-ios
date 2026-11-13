@@ -41,6 +41,7 @@ targets:
           - audio
         NSMicrophoneUsageDescription: Jarvis needs the microphone so you can talk to him. Audio is only sent to your own Jarvis server while a call is on.
         NSCameraUsageDescription: Jarvis uses the camera when you choose to take a photo or video to send to him.
+        NSPhotoLibraryUsageDescription: Jarvis watches your photo library for new screenshots (for example after a triple-tap on the back of the phone) and sends them to your own Jarvis server. Nothing else is read or sent, and you can turn it off in Jarvis Settings.
         NSPhotoLibraryAddUsageDescription: Jarvis saves camera snapshots to your photo library only when you tap Save.
         NSLocalNetworkUsageDescription: Jarvis connects to your Jarvis server, which may be on your local network.
         NSAppTransportSecurity:

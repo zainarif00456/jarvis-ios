@@ -279,3 +279,8 @@ About 3000 lines of SwiftUI / UIKit / AVFoundation / CoreMedia / Security / Netw
   Settings > Effects > Calm turn it into plain fades with no repeating motion.
 * Please check on the phone: ring panel spacing on a small phone and at large Dynamic Type, the portal open/close feel,
   frame rate on Home with all eight panels floating, and that the tab-screen entrance does not flash on tab switches.
+
+## Automatic screenshot upload (added 2026-11-13)
+- Pure, Linux-tested: `JarvisCore/ScreenshotLedger.swift` (detection filter, dedupe, ordering, retry state, persistence, status text), `JarvisModel/ScreenshotSyncModel.swift` (orchestration behind the `ScreenshotSource` protocol). Tests: `ScreenshotLedgerTests`, `ScreenshotSyncTests`.
+- Apple-only, NOT compiled here (only `swiftc -parse`): `JarvisTalk/Platform/PhotoScreenshotSource.swift` (PhotoKit), the Settings section, banner/haptic and background-task wiring in `JarvisTalkApp.swift`.
+- Not yet verified on a device: the Photos permission prompt, change notifications while backgrounded during a call, the iCloud-original export path.

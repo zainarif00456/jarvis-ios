@@ -35,6 +35,7 @@ public final class AppModel: ObservableObject {
     public let debrief = DebriefModel()
     public let briefing = BriefingModel()
     public let screen: ScreenModel
+    public let screenshots: ScreenshotSyncModel
     public let platform: Platform
 
     /// How long a liveness check after the app comes back from the background waits for the server's answer.
@@ -54,6 +55,7 @@ public final class AppModel: ObservableObject {
         settings = SettingsStore(defaults: platform.defaults, secrets: platform.secrets)
         call = CallModel(audio: platform.makeAudio(), permissions: platform.permissions)
         screen = ScreenModel(portals: portals, debrief: debrief)
+        screenshots = ScreenshotSyncModel(source: platform.screenshots, defaults: platform.defaults)
         wire()
     }
 
@@ -75,6 +77,11 @@ public final class AppModel: ObservableObject {
         }
         let provider: () -> ApiClient? = { [weak self] in self?.api }
         chat.apiProvider = provider; deck.apiProvider = provider; uploads.apiProvider = provider
+        screenshots.upload = { [weak self] url, name, mime, source in
+            guard let api = self?.api else { throw ScreenshotUploadError.notConnected }
+            _ = try await api.upload(fileURL: url, fileName: name, mime: mime, to: "/api/media/upload", fields: ["origin": "device", "source": source]) { _ in }
+        }
+        screenshots.onUploaded = { [weak self] in Task { await self?.deck.loadMedia() } }
         uploads.onUploaded = { [weak self] item, _ in
             if item.destination == .files { Task { await self?.deck.loadFiles(kind: "upload") } } else { Task { await self?.deck.loadMedia() } }
         }
@@ -94,6 +101,7 @@ public final class AppModel: ObservableObject {
             phase = .ready
             openSession(ep, token)
             call.begin(paired: true, autoStart: settings.autoStartCall)
+            Task { await screenshots.refresh() }
         } else {
             phase = .needsPairing
             call.begin(paired: false, autoStart: false)
@@ -145,6 +153,7 @@ public final class AppModel: ObservableObject {
             openSession(ep, token)
             call.begin(paired: true, autoStart: settings.autoStartCall)
             call.pairedNow()
+            Task { await screenshots.refresh() }
         } catch let e as ApiError {
             pairingError = Self.pairingMessage(e)
         } catch { pairingError = error.localizedDescription }
@@ -364,6 +373,7 @@ public final class AppModel: ObservableObject {
         isForeground = true; visibility.value = true
         send(.presence(visible: true))
         call.appBecameActive()
+        if phase == .ready { Task { await screenshots.refresh() } }
         if case .blocked(.serverUnresponsive) = call.phase { call.retryCall() }
         guard let s = session else { return }
         if fromBackground && link == .online {
@@ -387,6 +397,7 @@ public final class AppModel: ObservableObject {
     /// the old socket is dead: reconnect now instead of waiting for the watchdog.
     public func networkChanged(online: Bool, interfaceChanged: Bool = false) {
         networkOnline = online
+        if online { screenshots.connectivityChanged() }
         if online {
             if interfaceChanged { Task { await session?.reconnect() } } else { Task { await session?.nudge() } }
         } else if link != .online { link = .offline }
