@@ -119,6 +119,7 @@ public final class ScreenshotSyncModel: ObservableObject {
         access = a
         guard a.canWatch else {
             source.stopObserving()
+            if ledger.isActive { ledger.rebase(now: now()); save() }
             return
         }
         ledger.enable(now: now())

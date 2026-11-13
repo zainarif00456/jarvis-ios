@@ -47,6 +47,23 @@ final class ScreenshotLedgerTests: XCTestCase {
         XCTAssertEqual(l.lastError, "bad")
     }
 
+    func testHardFailureDropRemembersTheIdSoItIsNotRequeued() {
+        var l = ScreenshotLedger(); l.enable(now: at(0)); l.ingest([shot("a", 1)])
+        for _ in 0..<ScreenshotLedger.maxHardFailures { l.markRetry("a", now: at(2), message: "bad", hard: true, delay: 1) }
+        XCTAssertTrue(l.pending.isEmpty)
+        XCTAssertEqual(l.ingest([shot("a", 1)]), 0)
+        XCTAssertTrue(l.pending.isEmpty)
+        XCTAssertEqual(l.totalUploaded, 0)
+    }
+
+    func testRebaseSkipsScreenshotsTakenWhileAccessWasLost() {
+        var l = ScreenshotLedger(); l.enable(now: at(0))
+        l.rebase(now: at(100))
+        XCTAssertEqual(l.ingest([shot("gap", 50), shot("new", 150)]), 1)
+        XCTAssertEqual(l.pending.map { $0.id }, ["new"])
+        var off = ScreenshotLedger(); off.rebase(now: at(5)); XCTAssertNil(off.enabledAt)
+    }
+
     func testDropRemembersTheIdSoItIsNotQueuedAgain() {
         var l = ScreenshotLedger(); l.enable(now: at(0)); l.ingest([shot("a", 1)])
         l.drop("a", message: "gone")

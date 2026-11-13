@@ -61,6 +61,10 @@ public struct ScreenshotLedger: Codable, Equatable, Sendable {
     /// Stops watching and forgets the queue. The uploaded ids stay (they only guard against duplicates).
     public mutating func disable() { enabledAt = nil; pending = []; lastError = nil }
 
+    /// Moves the start date to `now` while the photo library cannot be watched (access revoked or limited), so that
+    /// screenshots taken during that gap are not sent in a burst once access returns. A no-op when not active.
+    public mutating func rebase(now: Date) { if enabledAt != nil { enabledAt = now } }
+
     /// Where a library query should start: never before the start date or the trim floor (trimFloor).
     public var queryStart: Date? {
         guard let e = enabledAt else { return nil }
@@ -116,7 +120,10 @@ public struct ScreenshotLedger: Codable, Equatable, Sendable {
         pending[i].lastError = message
         lastError = message
         if pending[i].hardFailures >= Self.maxHardFailures {
-            pending.remove(at: i)
+            // Dropped for good: remember the id like `drop` does, or the next library scan would queue it again.
+            let item = pending.remove(at: i)
+            if !uploaded.contains(where: { $0.id == id }) { uploaded.append(UploadedScreenshot(id: id, created: item.created)) }
+            trim()
             return false
         }
         pending[i].notBefore = now.addingTimeInterval(delay)
