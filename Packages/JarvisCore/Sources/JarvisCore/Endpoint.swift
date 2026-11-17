@@ -109,6 +109,9 @@ public struct Endpoint: Equatable, Codable, Sendable {
     public func requestHeaders(token: String?) -> [String: String] {
         var h = ["Origin": origin, "User-Agent": Endpoint.userAgent, "ngrok-skip-browser-warning": "1"]
         if let t = token { h["Cookie"] = "\(Endpoint.cookieName)=\(t)" }
+        if let identity = DeviceIdentity.published {
+            for (k, v) in identity.headers(route: suggestedName) { h[k] = v }
+        }
         return h
     }
     public static let userAgent = "JarvisTalk-iOS"

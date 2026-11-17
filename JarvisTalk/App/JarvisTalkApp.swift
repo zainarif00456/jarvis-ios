@@ -43,6 +43,7 @@ final class AppHolder: ObservableObject {
     let pip = ExecPiP()
     lazy var pipControl = PiPControl(pip: pip)
     private let network = NetworkMonitor()
+    private let deviceInfo = DeviceInfo(secrets: KeychainStore())
     private let permissions = SystemPermissions()
     private var started = false
     private let log = Logger(subsystem: "com.jarvis.talk", category: "app")
@@ -89,13 +90,14 @@ final class AppHolder: ObservableObject {
         model.exec.onSummary = { [weak self] n, t, d in self?.pip.update(running: n, title: t, detail: d) }
         network.onChange = { [weak self] online, changed in self?.model.networkChanged(online: online, interfaceChanged: changed) }
         network.start()
+        deviceInfo.start { [weak self] in self?.model.settings.deviceName ?? "iPhone" }
         model.launch()
         log.info("app started, paired: \(self.model.phase == .ready)")
     }
 
     func scene(_ phase: ScenePhase) {
         switch phase {
-        case .active: model.sceneBecameActive()
+        case .active: model.sceneBecameActive(); deviceInfo.rename(model.settings.deviceName)
         case .inactive: model.sceneBecameInactive(background: false)
         case .background: model.sceneBecameInactive(background: true); pip.appDidBackground()
         @unknown default: break
